@@ -1,0 +1,10 @@
+{
+  "id": "rl_bridge",
+  "name": "RL Bridge",
+  "author": "sts2-sans-tet",
+  "description": "RL training bridge - patches AutoSlay to communicate with external agent via TCP",
+  "version": "0.1.0",
+  "has_dll": true,
+  "has_pck": false,
+  "affects_gameplay": true
+}
