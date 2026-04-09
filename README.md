@@ -72,12 +72,13 @@ Game → Python:  {"type":"episode_end","result":"death","floor_reached":3,"fina
 - .NET 9 SDK (for building the mod)
 - Python 3.11+ with uv
 - WSL2 (for running Python agent; game runs on Windows)
-- Mods enabled in STS2 settings
+- Mods enabled in STS2 settings (launch the game normally first, a mod consent dialog will appear — accept it)
 
 ### Setup
 ```bash
 # Build and install the mod
 cd mod && dotnet build
+mkdir -p "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/rl_bridge"
 cp manifest.json bin/Debug/net9.0/rl_bridge.dll \
   "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/rl_bridge/"
 
