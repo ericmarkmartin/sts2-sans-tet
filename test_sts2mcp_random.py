@@ -70,6 +70,8 @@ def pick_random_action(state: dict) -> dict | None:
         return pick_menu_action(state)
     elif state_type == "game_over":
         return pick_game_over_action(state)
+    elif state_type == "overlay":
+        return pick_overlay_action(state)
     else:
         logger.info(f"Unknown state type: {state_type}, trying proceed")
         return {"action": "proceed"}
@@ -112,17 +114,15 @@ def pick_combat_action(state: dict) -> dict:
     return {"action": "end_turn"}
 
 
-_combat_card_selected = False
-
 def pick_combat_card_select_action(state: dict) -> dict:
-    global _combat_card_selected
     select_data = state.get("hand_select", state.get("combat_card_select", {}))
     cards = select_data.get("cards", [])
-    if cards and not _combat_card_selected:
-        _combat_card_selected = True
-        return {"action": "combat_select_card", "card_index": random.randint(0, len(cards) - 1)}
-    _combat_card_selected = False
-    return {"action": "combat_confirm_selection"}
+    if not cards:
+        return {"action": "combat_confirm_selection"}
+    # Check if we can confirm (card already selected)
+    if select_data.get("can_confirm"):
+        return {"action": "combat_confirm_selection"}
+    return {"action": "combat_select_card", "card_index": random.randint(0, len(cards) - 1)}
 
 
 def pick_map_action(state: dict) -> dict:
@@ -177,11 +177,11 @@ def pick_shop_action(state: dict) -> dict:
 def pick_card_select_action(state: dict) -> dict:
     card_select = state.get("card_select", {})
     cards = card_select.get("cards", [])
-    selected = [c for c in cards if c.get("is_selected")]
-    if not selected and cards:
-        idx = random.randint(0, len(cards) - 1)
-        return {"action": "select_card", "index": idx}
-    return {"action": "confirm_selection"}
+    if not cards:
+        return {"action": "confirm_selection"}
+    if card_select.get("can_confirm"):
+        return {"action": "confirm_selection"}
+    return {"action": "select_card", "index": random.randint(0, len(cards) - 1)}
 
 
 def pick_menu_action(state: dict) -> dict | None:
@@ -206,13 +206,52 @@ def pick_menu_action(state: dict) -> dict | None:
         logger.info("Menu: clicking standard run")
         return {"action": "click_standard"}
 
+    elif screen == "timeline":
+        if menu.get("inspect_screen_open"):
+            logger.info("Menu: closing timeline inspect screen")
+            return {"action": "reveal_epoch"}  # will close inspect screen first
+        elif menu.get("pending_reveals", 0) > 0:
+            logger.info(f"Menu: revealing epoch ({menu.get('pending_reveals')} pending)")
+            return {"action": "reveal_epoch"}
+        elif menu.get("has_back"):
+            logger.info("Menu: done with timeline, going back")
+            return {"action": "timeline_back"}
+        else:
+            logger.info("Menu: on timeline, waiting...")
+            return None
+
+    elif screen == "modal":
+        logger.info("Menu: dismissing modal dialog")
+        return {"action": "dismiss_screen"}
+
     elif screen == "main_menu":
-        logger.info("Menu: clicking singleplayer")
-        return {"action": "click_singleplayer"}
+        can_start = menu.get("can_start_run", True)
+        if menu.get("has_run_to_abandon"):
+            logger.info("Menu: abandoning existing run")
+            return {"action": "abandon_run"}
+        elif can_start:
+            logger.info("Menu: clicking singleplayer")
+            return {"action": "click_singleplayer"}
+        elif menu.get("has_timeline"):
+            logger.info("Menu: can't start run, opening timeline for unlocks")
+            return {"action": "click_timeline"}
+        else:
+            logger.info("Menu: singleplayer blocked, trying dismiss")
+            return {"action": "dismiss_screen"}
+
+    elif screen == "loading":
+        return None  # wait for menu to finish loading
 
     else:
-        logger.info(f"Menu: unknown screen '{screen}', waiting...")
-        return None
+        logger.info(f"Menu: unknown screen '{screen}', trying dismiss")
+        return {"action": "dismiss_screen"}
+
+
+def pick_overlay_action(state: dict) -> dict | None:
+    overlay = state.get("overlay", {})
+    screen_type = overlay.get("screen_type", "")
+    logger.info(f"Overlay: {screen_type}, trying proceed")
+    return {"action": "proceed"}
 
 
 def pick_game_over_action(state: dict) -> dict:
@@ -245,6 +284,20 @@ def main():
     step = 0
     last_state_type = None
     errors_in_a_row = 0
+    stuck_count = 0
+    last_state_sig = None  # signature for stuck detection
+    episode = 0
+
+    # Fallback actions to try when stuck
+    FALLBACK_ACTIONS = [
+        {"action": "dismiss_screen"},
+        {"action": "proceed"},
+        {"action": "confirm_selection"},
+        {"action": "combat_confirm_selection"},
+        {"action": "skip_card_reward"},
+        {"action": "cancel_selection"},
+        {"action": "end_turn"},
+    ]
 
     while True:
         try:
@@ -269,10 +322,26 @@ def main():
             logger.info(f"State: {state_type} | HP={hp} Floor={floor}")
             last_state_type = state_type
 
+        # First try the normal action picker
         action = pick_random_action(state)
+
         if action is None:
             time.sleep(0.5)
             continue
+
+        # Stuck detection: track state signature across actions
+        state_sig = f"{state_type}:{hp}:{floor}:{state.get('menu', {}).get('screen', '')}:{state.get('overlay', {}).get('screen_type', '')}"
+        if state_sig == last_state_sig:
+            stuck_count += 1
+        else:
+            stuck_count = 0
+            last_state_sig = state_sig
+
+        # If stuck for too many steps, override with fallback actions
+        if stuck_count > 10:
+            fallback_idx = (stuck_count - 11) % len(FALLBACK_ACTIONS)
+            action = FALLBACK_ACTIONS[fallback_idx]
+            logger.warning(f"Stuck for {stuck_count} steps on {state_type}, trying fallback: {action.get('action')}")
 
         step += 1
         try:
@@ -280,11 +349,13 @@ def main():
             status = result.get("status", "?")
             if status != "ok":
                 msg = result.get("error", result.get("message", status))
-                logger.warning(f"Step {step}: {action.get('action')} -> {msg}")
+                if stuck_count <= 8:  # don't spam warnings during fallback
+                    logger.warning(f"Step {step}: {action.get('action')} -> {msg}")
                 time.sleep(0.3)
             else:
                 logger.info(f"Step {step}: {action.get('action')} -> ok | HP={hp} Floor={floor}")
-                time.sleep(0.5)  # let the game settle
+                stuck_count = 0  # successful action resets stuck counter
+                time.sleep(0.5)
         except urllib.error.HTTPError as e:
             body = e.read().decode() if e.fp else ""
             logger.warning(f"Step {step}: {action.get('action')} -> HTTP {e.code}: {body[:100]}")
