@@ -4,115 +4,84 @@ RL training harness for Slay the Spire 2.
 
 ## What This Is
 
-A system for training AI agents to play Slay the Spire 2 via reinforcement learning. It works by patching the game's built-in automated player (AutoSlay) to communicate with an external Python process over TCP, replacing random decisions with agent-driven ones.
+A system for training AI agents to play Slay the Spire 2. It uses [STS2MCP](https://github.com/Gennadiyev/STS2MCP) (a mod that exposes game state and actions via REST API) as the game interface, with our [fork](https://github.com/ericmarkmartin/STS2MCP) adding episode lifecycle automation.
 
-The game runs normally (with fast animations), while a Python gymnasium environment receives structured observations (hand, enemies, intents, energy, etc.) and sends back actions (play card, end turn, use potion, pick card reward, navigate map).
+The game runs normally while a Python agent polls the REST API for game state and posts actions. A protocol layer (planned) will abstract over two backends — Godot (via STS2MCP) for eval/demo, and headless (direct sts2.dll) for high-throughput training.
 
 ## Status
 
-**Phase A (current): Mod-based harness — working for single episodes.**
+**Multi-episode loop working.** A random agent can:
+- Navigate menus (singleplayer → standard → character select → confirm)
+- Abandon existing runs, dismiss modals
+- Handle timeline/unlock screens
+- Play through all in-run states: combat, map, events, rewards, card select, shops, rest sites
+- Handle game over (continue → main menu → start new run)
+- Loop continuously across episodes
 
-What works:
-- Combat: full observation space (hand, enemies, intents, powers, energy, valid actions), card play with targeting, potions, end turn
-- Card rewards: agent picks from offered cards or skips
-- Map navigation: agent chooses which room to visit next
-- Episode end: death/victory reported to Python with final stats
-- Reward computation: floor progress, HP delta, combat/run outcomes
-
-What doesn't work yet:
-- Multi-episode looping (game quits after each run, must relaunch)
-- Event decisions (patched but not well-tested)
-- Rest site decisions (patched but not well-tested)
-- Shop decisions (uses original random AutoSlay behavior)
-
-## How It Works
-
-### C# Mod (`mod/`)
-
-A Harmony mod that loads into STS2 via the game's native mod system. It applies prefix patches to AutoSlay's decision handlers:
-
-| Patch | What it replaces |
-|-------|-----------------|
-| `IsReleaseGamePatch` | Unlocks AutoSlay on release builds |
-| `CombatPatch` | Card/target/potion selection + end turn |
-| `MapPatch` | Path selection on the dungeon map |
-| `CardRewardPatch` | Card pick after combat |
-| `EventPatch` | Event option selection |
-| `RestSitePatch` | Rest vs upgrade at campfires |
-| `QuitGamePatch` | Sends episode_end before game exits |
-
-### Python Environment (`sts2_rl/`)
-
-A gymnasium-compatible environment that acts as a TCP server:
-
-```python
-from sts2_rl.env import STS2Env
-
-env = STS2Env(port=19720)
-obs, info = env.reset()
-while not done:
-    action = agent.predict(obs)
-    obs, reward, terminated, truncated, info = env.step(action)
-```
-
-### IPC Protocol
-
-Newline-delimited JSON over TCP on localhost:19720.
-
-```
-Game → Python:  {"type":"obs","decision_type":"combat","obs":{...},"run_context":{...}}
-Python → Game:  {"type":"action","action_type":"play_card","card_index":2,"target_index":0}
-Game → Python:  {"type":"episode_end","result":"death","floor_reached":3,"final_hp":0,...}
-```
+The random agent dies fast (floor 2-6), so later-game states (bosses, act transitions) are under-tested.
 
 ## Quick Start
 
 ### Prerequisites
 - Slay the Spire 2 (Steam, Windows)
-- .NET 9 SDK (for building the mod)
+- .NET 9 SDK
 - Python 3.11+ with uv
-- WSL2 (for running Python agent; game runs on Windows)
-- Mods enabled in STS2 settings (launch the game normally first, a mod consent dialog will appear — accept it)
+- WSL2 (Python runs on WSL, game runs on Windows)
+- Mods enabled in STS2 settings (launch game, accept the mod consent dialog)
 
 ### Setup
 ```bash
-# Build and install the mod
-cd mod && dotnet build
-mkdir -p "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/rl_bridge"
-cp manifest.json bin/Debug/net9.0/rl_bridge.dll \
-  "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/rl_bridge/"
+# Build and install STS2MCP (our fork)
+cd ~/Development/STS2MCP
+dotnet build -p:STS2GameDataDir="/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64"
+mkdir -p "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP"
+cp mod_manifest.json "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP/manifest.json"
+cp bin/Debug/net9.0/STS2_MCP.dll "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP/"
 
 # Install Python deps
+cd ~/Development/sts2-sans-tet
 uv sync
 ```
 
 ### Run
 ```bash
-# Terminal 1: start agent
-uv run python test_random_agent.py
+# Launch game
+cmd.exe /c 'start steam://run/2868840'
 
-# Terminal 2: launch game (or set Steam launch options to: --autoslay --seed test123)
-cmd.exe /c 'start steam://run/2868840//--autoslay --seed test123'
+# Start random agent (handles menu navigation automatically)
+uv run python test_sts2mcp_random.py
 ```
+
+## Architecture
+
+See [NEXT_STEPS.md](NEXT_STEPS.md) for the full architecture plan.
+
+```
+┌─ RL training loop (Python API)
+│
+Protocol Layer ──┤
+│                └─ LLM agent (MCP server)
+│
+┌────┴────┐
+│         │
+Godot     Headless
+Backend   Backend
+│         │
+STS2MCP   sts2.dll
+REST API  (direct .NET)
+```
+
+## Key Files
+
+- `test_sts2mcp_random.py` — Random agent smoke test with full episode lifecycle
+- `sts2_rl/` — Python environment (being rewritten for protocol layer)
+- `mod/` — Old custom Harmony mod (kept as reference, replaced by STS2MCP)
+- `decompiled/` — ILSpy-decompiled STS2 source (3,304 C# files, not checked in)
+- `NEXT_STEPS.md` — Roadmap and implementation notes
 
 ## Roadmap
 
-### Phase A improvements (mod-based)
-- **Multi-episode looping**: patch AutoSlayer to restart runs instead of quitting, enabling continuous training without relaunching
-- **Richer observations**: draw pile composition, discard pile contents, relic effects, orb state
-- **Better action validation**: return invalid action feedback to agent instead of silently ending turn
-- **Parallel instances**: run multiple game instances on different ports for faster data collection
-- **Integration with RL frameworks**: SB3, cleanrl, or custom PPO
-
-### Phase B: Headless harness
-- Load `sts2.dll` in a standalone .NET process without Godot
-- Drive game logic directly via `RunManager`, `CombatManager`, `ActionQueueSet`
-- Stub out Godot dependencies (`Vector2`, `Texture2D`, timing)
-- Target: thousands of games/sec vs ~1 game/min with the mod approach
-- Key enablers already in game code: `NonInteractiveMode`, `TestMode`, null-safe Godot calls
-
-### Phase C: Training
-- Curriculum learning: start with single-act runs, progress to full runs
-- Reward shaping: per-combat rewards, deck quality metrics
-- Action masking: leverage `valid_actions` to constrain policy
-- Observation encoding: fixed-size representations for neural network input
+1. **Protocol layer** — Python abstraction matching STS2MCP's API, exposed as both Python API and MCP server
+2. **Better agent** — Needs to survive longer to exercise late-game states
+3. **Headless backend** — Load sts2.dll without Godot for thousands of games/sec
+4. **RL training** — Curriculum learning, reward shaping, action masking
