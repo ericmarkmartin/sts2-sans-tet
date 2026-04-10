@@ -3,22 +3,29 @@
 ## Architecture
 
 ```
-Agent / Training Loop
-        │
-   Protocol Layer  (Python — our abstraction)
-        │
-   ┌────┴────┐
-   │         │
- Godot     Headless
- Backend   Backend
-   │         │
- STS2MCP   sts2.dll
- REST API  (direct .NET)
+┌─ RL training loop (Python API)
+│
+Protocol Layer ──┤
+│                └─ LLM agent (MCP server)
+│
+┌────┴────┐
+│         │
+Godot     Headless
+Backend   Backend
+│         │
+STS2MCP   sts2.dll
+REST API  (direct .NET)
 ```
 
 The protocol layer defines the contract: `get_state()`, `play_card()`, `end_turn()`, `choose_map_node()`, etc. It matches STS2MCP's JSON state format and action names as the canonical API shape. The Godot backend is a thin pass-through to STS2MCP's REST API. The headless backend calls into game logic directly.
 
 Agent code never knows which backend it's talking to. Training uses headless for throughput, eval/demo uses Godot to watch it play.
+
+The protocol layer is exposed two ways:
+- **Python API** for RL training loops (gymnasium env, direct calls)
+- **MCP server** for LLM agents (Claude Desktop/Code, other MCP clients)
+
+Both interfaces are backend-agnostic — an LLM can play against either Godot or headless. This makes STS2MCP's own MCP server redundant once our protocol layer is in place, since theirs is pinned to the Godot backend only.
 
 If RL needs optimized tensor representations, that's handled in the training code (observation encoding), not the protocol.
 
