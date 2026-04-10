@@ -70,8 +70,7 @@ def pick_random_action(state: dict) -> dict | None:
         logger.info("At menu — start a run manually in-game")
         return None
     elif state_type == "game_over":
-        logger.info("Game over!")
-        return None
+        return pick_game_over_action(state)
     else:
         logger.info(f"Unknown state type: {state_type}, trying proceed")
         return {"action": "proceed"}
@@ -125,7 +124,8 @@ def pick_combat_card_select_action(state: dict) -> dict:
 
 
 def pick_map_action(state: dict) -> dict:
-    next_options = state.get("next_options", state.get("map", {}).get("next_options", []))
+    map_data = state.get("map", {})
+    next_options = map_data.get("next_options", [])
     if next_options:
         return {"action": "choose_map_node", "index": random.randint(0, len(next_options) - 1)}
     return {"action": "proceed"}
@@ -151,15 +151,17 @@ def pick_rewards_action(state: dict) -> dict:
 
 
 def pick_event_action(state: dict) -> dict:
-    options = state.get("options", state.get("event", {}).get("options", []))
+    event = state.get("event", {})
+    options = event.get("options", [])
     available = [o for o in options if not o.get("is_locked", False)]
     if available:
-        return {"action": "choose_event_option", "index": random.randint(0, len(available) - 1)}
+        return {"action": "choose_event_option", "index": available[random.randint(0, len(available) - 1)].get("index", 0)}
     return {"action": "proceed"}
 
 
 def pick_rest_action(state: dict) -> dict:
-    options = state.get("options", state.get("rest_options", []))
+    rest_data = state.get("rest_site", state.get("rest", {}))
+    options = rest_data.get("options", []) if isinstance(rest_data, dict) else []
     if options:
         return {"action": "choose_rest_option", "index": random.randint(0, len(options) - 1)}
     return {"action": "proceed"}
@@ -171,11 +173,26 @@ def pick_shop_action(state: dict) -> dict:
 
 
 def pick_card_select_action(state: dict) -> dict:
-    cards = state.get("cards", [])
+    card_select = state.get("card_select", {})
+    cards = card_select.get("cards", [])
     selected = [c for c in cards if c.get("is_selected")]
     if not selected and cards:
-        return {"action": "select_card", "index": random.randint(0, len(cards) - 1)}
+        idx = random.randint(0, len(cards) - 1)
+        return {"action": "select_card", "index": idx}
     return {"action": "confirm_selection"}
+
+
+def pick_game_over_action(state: dict) -> dict:
+    game_over = state.get("game_over", {})
+    if game_over.get("main_menu_available"):
+        logger.info("Game over — returning to main menu")
+        return {"action": "game_over_main_menu"}
+    elif game_over.get("continue_available"):
+        logger.info("Game over — clicking continue")
+        return {"action": "game_over_continue"}
+    else:
+        # Buttons not ready yet, wait
+        return None  # type: ignore[return-value]
 
 
 def pick_treasure_action(state: dict) -> dict:
