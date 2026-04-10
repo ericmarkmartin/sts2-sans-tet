@@ -48,7 +48,7 @@ def pick_random_action(state: dict) -> dict | None:
 
     if state_type in ("monster", "elite", "boss"):
         return pick_combat_action(state)
-    elif state_type == "combat_card_select":
+    elif state_type in ("combat_card_select", "hand_select"):
         return pick_combat_card_select_action(state)
     elif state_type == "map":
         return pick_map_action(state)
@@ -67,8 +67,7 @@ def pick_random_action(state: dict) -> dict | None:
     elif state_type == "treasure_relic":
         return pick_treasure_action(state)
     elif state_type == "menu":
-        logger.info("At menu — start a run manually in-game")
-        return None
+        return pick_menu_action(state)
     elif state_type == "game_over":
         return pick_game_over_action(state)
     else:
@@ -113,13 +112,16 @@ def pick_combat_action(state: dict) -> dict:
     return {"action": "end_turn"}
 
 
+_combat_card_selected = False
+
 def pick_combat_card_select_action(state: dict) -> dict:
-    # Select a random card if prompted, then confirm
-    cards = state.get("selectable_cards", state.get("cards", []))
-    if cards:
-        selected = [c for c in cards if c.get("is_selected")]
-        if not selected:
-            return {"action": "combat_select_card", "card_index": random.randint(0, len(cards) - 1)}
+    global _combat_card_selected
+    select_data = state.get("hand_select", state.get("combat_card_select", {}))
+    cards = select_data.get("cards", [])
+    if cards and not _combat_card_selected:
+        _combat_card_selected = True
+        return {"action": "combat_select_card", "card_index": random.randint(0, len(cards) - 1)}
+    _combat_card_selected = False
     return {"action": "combat_confirm_selection"}
 
 
@@ -182,6 +184,37 @@ def pick_card_select_action(state: dict) -> dict:
     return {"action": "confirm_selection"}
 
 
+def pick_menu_action(state: dict) -> dict | None:
+    menu = state.get("menu", {})
+    screen = menu.get("screen", "unknown")
+
+    if screen == "character_select":
+        characters = menu.get("characters", [])
+        unlocked = [c for c in characters if not c.get("is_locked", True)]
+        can_confirm = menu.get("can_confirm", False)
+
+        if can_confirm:
+            logger.info("Menu: confirming character")
+            return {"action": "confirm_character"}
+        elif unlocked:
+            char = random.choice(unlocked)
+            logger.info(f"Menu: selecting character {char.get('id')}")
+            return {"action": "select_character", "character": char.get("id", "0")}
+        return None
+
+    elif screen == "singleplayer_submenu":
+        logger.info("Menu: clicking standard run")
+        return {"action": "click_standard"}
+
+    elif screen == "main_menu":
+        logger.info("Menu: clicking singleplayer")
+        return {"action": "click_singleplayer"}
+
+    else:
+        logger.info(f"Menu: unknown screen '{screen}', waiting...")
+        return None
+
+
 def pick_game_over_action(state: dict) -> dict:
     game_over = state.get("game_over", {})
     if game_over.get("main_menu_available"):
@@ -235,11 +268,6 @@ def main():
         if state_type != last_state_type:
             logger.info(f"State: {state_type} | HP={hp} Floor={floor}")
             last_state_type = state_type
-
-        if state_type == "menu":
-            logger.info("Waiting for run to start (start one manually in-game)...")
-            time.sleep(3)
-            continue
 
         action = pick_random_action(state)
         if action is None:
