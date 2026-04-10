@@ -1,51 +1,50 @@
 # Next Steps
 
-## Immediate: Multi-Episode Looping
-
-Currently the game quits after each episode. For training we need continuous runs.
-
-### AutoSlayer lifecycle
-
-`AutoSlayer.Start()` kicks off `RunAsync()` as a fire-and-forget task. `RunAsync()` calls `PlayRunAsync()`, and its `finally` block sets `IsActive = false` and calls `QuitGame()`. The flow is:
+## Architecture
 
 ```
-Start() → RunAsync() → PlayRunAsync() → [run plays out] → finally { QuitGame() }
+Agent / Training Loop
+        │
+   Protocol Layer  (Python — our abstraction)
+        │
+   ┌────┴────┐
+   │         │
+ Godot     Headless
+ Backend   Backend
+   │         │
+ STS2MCP   sts2.dll
+ REST API  (direct .NET)
 ```
 
-### Approaches tried
+The protocol layer defines the contract: `get_state()`, `play_card()`, `end_turn()`, `choose_map_node()`, etc. It matches STS2MCP's JSON state format and action names as the canonical API shape. The Godot backend is a thin pass-through to STS2MCP's REST API. The headless backend calls into game logic directly.
 
-1. **Patching `RunAsync` to loop** — called `PlayRunAsync` via reflection after each run. Problem: `RunAsync`'s `finally` block does cleanup (`IsActive = false`, dispose card selector, close log), so calling `PlayRunAsync` again after that leaves broken state.
+Agent code never knows which backend it's talking to. Training uses headless for throughput, eval/demo uses Godot to watch it play.
 
-2. **Patching `QuitGame` as a no-op + wrapper around `Start`** — tried calling `Start` again from a wrapper. Problem: `Start` would re-enter the patch, creating recursion.
+If RL needs optimized tensor representations, that's handled in the training code (observation encoding), not the protocol.
 
-### Suggested approach
+## Phase 1: Fork STS2MCP + Episode Management
 
-Patch `RunAsync` directly (it's private, but Harmony can patch by name). Replace it with a version that:
-1. Keeps the setup from `PlayRunAsync` (seed, FastMode, character unlocks, RNG, card selector)
-2. Loops: after `PlayRunAsync` completes (death/victory), send `episode_end`, wait for `reset_ack`, re-setup, and call `PlayMainMenuAsync` + `PlayRunAsync` again
-3. Handles cleanup properly between episodes (re-initialize `_random`, `_watchdog`, `_cardSelectorScope`)
-4. Only calls `QuitGame` when the Python agent disconnects
+**Goal:** Continuous multi-episode training against a real Godot instance.
 
-Key methods to call between episodes (from `AutoSlayer`, accessed via reflection):
-- `PlayMainMenuAsync(ct)` — navigates menus, picks character, starts run
-- `PlayRunAsync(seed, ct)` — plays the full run
+Fork [STS2MCP](https://github.com/Gennadiyev/STS2MCP) and add episode lifecycle endpoints:
 
-The `_cardSelectorScope`, `_random`, and `_watchdog` fields need to be re-initialized between runs. All are private fields on the `AutoSlayer` instance.
+- `POST /api/v1/start_run` — navigate menus, pick character/ascension, begin a run
+- `POST /api/v1/restart` — handle game-over screen, return to menu, start new run
+- `GET /api/v1/episode_status` — is run in progress, did player die, did player win
 
-### Simpler alternative
+STS2MCP already has the `RunOnMainThread` queue for executing actions on the Godot thread, Instant Mode support, and comprehensive state/action coverage (37 actions, all game screens). Our current custom mod's observation builder and action handling become unnecessary.
 
-Have Python relaunch the game process for each episode. Slower (~30s startup per episode) but avoids all lifecycle issues. Good enough for initial experiments.
+**Deliver:**
+- Forked STS2MCP with episode management
+- Python protocol layer with Godot backend (wraps REST API)
+- `STS2Env` gymnasium wrapper using the protocol layer
+- Random-policy smoke test running continuous episodes
 
-## Phase A Improvements
+## Phase 2: Headless Backend
 
-- **Richer observations**: draw/discard pile composition, relic effects, orb state
-- **Better action validation**: return feedback to agent on invalid actions instead of silently ending turn
-- **Parallel instances**: multiple game instances on different ports
-- **RL framework integration**: SB3, cleanrl, or custom PPO
+**Goal:** Thousands of games/sec for large-scale training.
 
-## Phase B: Headless Harness
-
-Load `sts2.dll` in a standalone .NET process without Godot for maximum throughput.
+Load `sts2.dll` in a standalone .NET process without Godot. Implement the same protocol contract as the Godot backend.
 
 Key enablers already in game code:
 - `NonInteractiveMode.IsActive` — skips animations and frame waits
@@ -56,13 +55,23 @@ Key enablers already in game code:
 Would need to:
 - Stub out Godot types (`Vector2`, `Texture2D`, `SceneTree`, `Engine.GetMainLoop()`)
 - Drive via `RunManager` + `CombatManager` + `ActionQueueSet` directly
-- Mock or skip `Cmd.Wait()` (already skipped in NonInteractiveMode)
+- Implement state serialization matching STS2MCP's JSON format
+- Implement action execution matching STS2MCP's action names
 
-Target: thousands of games/sec vs ~1 game/min with mod approach.
+The headless backend exposes the same Python protocol interface, so training code works unchanged.
 
-## Phase C: Training
+## Phase 3: Training
 
 - Curriculum learning: start with single-act runs, progress to full runs
 - Reward shaping: per-combat rewards, deck quality metrics
-- Action masking: leverage `valid_actions` to constrain policy output
+- Action masking: leverage valid action lists from state to constrain policy output
 - Observation encoding: fixed-size tensor representations for neural network input
+- Integration with SB3, cleanrl, or custom PPO
+
+## Current State (as of 2026-04-09)
+
+We have a working proof-of-concept (custom Harmony mod + Python env) that demonstrates single-episode combat, card rewards, and map navigation via TCP. This will be replaced by the architecture above. The existing code is useful as reference for:
+- How Harmony patching works with STS2 (`mod/src/Patches/`)
+- What game APIs exist for state reading and action execution (`mod/src/ObservationBuilder.cs`, `mod/src/Patches/CombatPatch.cs`)
+- The decompiled source structure (`decompiled/` — 3,304 C# files from ILSpy)
+- API naming gotchas (see memory file `sts2_architecture.md`)
