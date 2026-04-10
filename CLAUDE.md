@@ -1,19 +1,20 @@
 # STS2 RL Training Harness
 
-## Building
+## Building STS2MCP (game mod)
 
 ```bash
-cd mod && dotnet build
+cd ~/Development/STS2MCP
+dotnet build -p:STS2GameDataDir="/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64"
 ```
 
-Requires .NET 9 SDK. References game DLLs from Steam install at
-`/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/`.
-
-## Installing the Mod
+## Installing STS2MCP
 
 ```bash
-cp mod/manifest.json mod/bin/Debug/net9.0/rl_bridge.dll \
-  "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/rl_bridge/"
+mkdir -p "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP"
+cp ~/Development/STS2MCP/mod_manifest.json \
+  "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP/manifest.json"
+cp ~/Development/STS2MCP/bin/Debug/net9.0/STS2_MCP.dll \
+  "/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/STS2_MCP/"
 ```
 
 ## Python
@@ -24,10 +25,13 @@ uv sync
 
 ## Running
 
-1. Start Python agent: `uv run python test_random_agent.py`
-2. Launch game via Steam with `--autoslay --seed <seed>` (set in Steam launch options, or from WSL: `cmd.exe /c 'start steam://run/2868840//--autoslay --seed test123'`)
+1. Launch game via Steam: `cmd.exe /c 'start steam://run/2868840'`
+2. Start random agent: `uv run python test_sts2mcp_random.py`
+   (agent handles menu navigation and starts runs automatically)
 
 ## Key Files
 
 - See `README.md` for architecture and how everything works
 - See `NEXT_STEPS.md` for roadmap and implementation notes
+- STS2MCP fork: `~/Development/STS2MCP` (github.com/ericmarkmartin/STS2MCP)
+- Decompiled game source: `decompiled/` (not checked in)
