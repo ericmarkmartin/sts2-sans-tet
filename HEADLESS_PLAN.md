@@ -24,11 +24,18 @@ reset a run and execute at least one complete combat.
 - `RunManager.StartRun(...)`, assumed below, does not exist. The test-oriented
   startup seam is `RunState.CreateForTest(...)` followed by
   `RunManager.SetUpTest(...)`.
-- Phase B is blocked during model bootstrap. `ModelDb.Init()` is callable after
-  marking `ModManager` skipped, but `ModelIdSerializationCache.Init()` reaches
-  `Godot.OS` through logging. `GodotSharp.dll` then invokes native callbacks
-  that are installed only by the Godot engine and terminates the process with
-  an access violation/SIGSEGV.
+- Standalone Phase B now creates a complete seeded `RunState` and exits zero.
+  The host mirrors `ModelIdSerializationCache.Init()` without its three
+  `Godot.Mathf` calls and Godot-backed final log, installs the game's test mode,
+  and supplies the narrow in-memory progress object graph read during player
+  construction. Against `v0.107.1`, it reproduces the rendered game's cache
+  counts and hash exactly: 20 categories, 1,622 entries, 57 epochs, hash
+  `3954186980`.
+- The next standalone boundary is `RunManager.SetUpTest(...)`.
+  `phase-b-manager` constructs a host-owned no-op `INetGameService`, but setup
+  still reaches native Godot and exits with SIGSEGV while building shared run
+  services. Static analysis of the constructors in `InitializeShared` is the
+  next task.
 - This native failure reproduces in both Linux .NET and a self-contained
   Windows .NET 9 host. Resolving the real `GodotSharp.dll` is enough for managed
   type loading, but not for executing arbitrary game methods.
@@ -127,7 +134,7 @@ run on the same machine when possible.
 - If it is too expensive, use the failure traces below to scope a standalone
   stub assembly before proceeding.
 
-### Phase B1 — Standalone model bootstrap  (conditional, high risk)
+### Phase B1 — Standalone model bootstrap  (passed through RunState)
 
 **Goal:** initialize `ModelDb` and create a `RunState` without native Godot.
 
@@ -141,10 +148,10 @@ Known required sequence:
 6. `RunManager.SetUpTest(...)`.
 7. `RunManager.Launch()`.
 
-Replace `GodotSharp.dll` with a minimal compatible stub assembly. Grow the stub
-only from observed call paths, beginning with `OS`, `StringName`, `Mathf`, and
-the logging dependencies. Maintain a machine-readable inventory of every
-implemented Godot member and the game call path that requires it.
+The working host currently bypasses only the model-cache `Mathf` and logging
+calls rather than replacing all of `GodotSharp.dll`. Continue growing
+host-owned interfaces from observed call paths. Maintain a machine-readable
+inventory of every bypassed or implemented member and its game call path.
 
 **Stop condition:** if reaching `RunState` requires broad scene-tree,
 resource-loading, or generated Godot binding behavior, reassess the standalone

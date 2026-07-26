@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 
@@ -21,7 +22,8 @@ internal static class Program
             {
                 "probe" => Probe(host),
                 "inspect" => Inspect(host, options.TypeName),
-                "phase-b-startup" => PhaseBStartup(host),
+                "phase-b-startup" => PhaseBStartup(host, initializeManager: false),
+                "phase-b-manager" => PhaseBStartup(host, initializeManager: true),
                 "stdio" => Stdio(host),
                 _ => throw new ArgumentException($"Unknown command: {options.Command}")
             };
@@ -33,18 +35,33 @@ internal static class Program
         }
     }
 
-    private static int PhaseBStartup(GameAssemblyHost host)
+    private static int PhaseBStartup(
+        GameAssemblyHost host,
+        bool initializeManager)
     {
         var assembly = host.LoadGameAssembly();
+        EnableGameTestMode(assembly);
         MarkModLoadingSkipped(assembly);
         var modelDbType = assembly.GetType("MegaCrit.Sts2.Core.Models.ModelDb", throwOnError: true)!;
         modelDbType.GetMethod("Init", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
-        var modelIdCacheType = assembly.GetType(
-            "MegaCrit.Sts2.Core.Multiplayer.Serialization.ModelIdSerializationCache",
-            throwOnError: true)!;
-        modelIdCacheType.GetMethod("Init", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
+        Console.WriteLine(JsonSerializer.Serialize(new { stage = "model_instances_created" }));
+        var cache = StandaloneModelCacheInitializer.Initialize(assembly);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "model_cache_initialized_without_godot",
+            model_types = cache.ModelTypes,
+            categories = cache.Categories,
+            entries = cache.Entries,
+            epochs = cache.Epochs,
+            hash = cache.Hash
+        }));
         modelDbType.GetMethod("InitIds", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
         Console.WriteLine(JsonSerializer.Serialize(new { stage = "model_db_initialized" }));
+        InstallInMemorySaveManager(assembly);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "in_memory_save_manager_installed"
+        }));
 
         var runStateType = assembly.GetType("MegaCrit.Sts2.Core.Runs.RunState", throwOnError: true)!;
         var createForTest = runStateType.GetMethod(
@@ -53,19 +70,29 @@ internal static class Program
             ?? throw new MissingMethodException(runStateType.FullName, "CreateForTest");
 
         // Reflection does not apply optional parameter defaults. Null selects the
-        // game's default player/acts/modifiers and seed; 0 is GameMode.Standard.
-        var state = createForTest.Invoke(null, [null, null, null, 0, 0, null])
+        // game's default player/acts/modifiers; 0 is GameMode.Standard. Supply a
+        // seed explicitly so SeedHelper does not consult engine-backed entropy.
+        var state = createForTest.Invoke(
+                null,
+                [null, null, null, 0, 0, "HEADLESSBENCH"])
             ?? throw new InvalidOperationException("CreateForTest returned null");
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             stage = "test_run_state_created",
             type = state.GetType().FullName
         }));
+        if (!initializeManager)
+            return 0;
 
         var managerType = assembly.GetType(RunManagerTypeName, throwOnError: true)!;
         var manager = Activator.CreateInstance(managerType, nonPublic: true)!;
-        managerType.GetMethod("SetUpNewSingleplayer")!.Invoke(
-            manager, [state, false, null]);
+        var netService = CreateStandaloneNetService(assembly);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "standalone_net_service_created"
+        }));
+        managerType.GetMethod("SetUpTest")!.Invoke(
+            manager, [state, netService, true, false]);
         Console.WriteLine(JsonSerializer.Serialize(new { stage = "singleplayer_setup_complete" }));
 
         var launchedState = managerType.GetMethod("Launch")!.Invoke(manager, null);
@@ -75,6 +102,79 @@ internal static class Program
             same_state = ReferenceEquals(state, launchedState)
         }));
         return 0;
+    }
+
+    private static object CreateStandaloneNetService(Assembly assembly)
+    {
+        var serviceInterface = assembly.GetType(
+            "MegaCrit.Sts2.Core.Multiplayer.Game.INetGameService",
+            throwOnError: true)!;
+        var createProxy = typeof(DispatchProxy).GetMethods()
+            .Single(method =>
+                method.Name == nameof(DispatchProxy.Create)
+                && method.IsGenericMethodDefinition
+                && method.GetGenericArguments().Length == 2
+                && method.GetParameters().Length == 0);
+        return createProxy
+            .MakeGenericMethod(
+                serviceInterface, typeof(StandaloneNetGameServiceProxy))
+            .Invoke(null, null)
+            ?? throw new InvalidOperationException(
+                "Could not create INetGameService proxy");
+    }
+
+    private static void EnableGameTestMode(Assembly assembly)
+    {
+        var testModeType = assembly.GetType(
+            "MegaCrit.Sts2.Core.TestSupport.TestMode", throwOnError: true)!;
+        testModeType.GetMethod(
+                "TurnOnInternal", BindingFlags.Public | BindingFlags.Static)
+            ?.Invoke(null, null);
+    }
+
+    private static void InstallInMemorySaveManager(Assembly assembly)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "save_manager_host_start"
+        }));
+        var managerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Saves.SaveManager", throwOnError: true)!;
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "save_manager_types_loaded"
+        }));
+
+        // SaveManager's public test constructor initializes every persistence
+        // subsystem, including Godot/Sentry-adjacent paths we do not need just
+        // to construct a Player. Install the narrow object graph read by the
+        // Player constructor: SaveManager -> ProgressSaveManager -> Progress.
+        var progressManagerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager",
+            throwOnError: true)!;
+        var progressType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Saves.ProgressState", throwOnError: true)!;
+        var progress = progressType.GetMethod(
+                "CreateDefault", BindingFlags.Public | BindingFlags.Static)
+            ?.Invoke(null, null)
+            ?? throw new MissingMethodException(progressType.FullName, "CreateDefault");
+        var progressManager = RuntimeHelpers.GetUninitializedObject(progressManagerType);
+        progressManagerType.GetField(
+                "<Progress>k__BackingField",
+                BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.SetValue(progressManager, progress);
+        var manager = RuntimeHelpers.GetUninitializedObject(managerType);
+        managerType.GetField(
+                "_progressSaveManager",
+                BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.SetValue(manager, progressManager);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "save_manager_constructed"
+        }));
+        managerType.GetMethod(
+                "MockInstanceForTesting", BindingFlags.Public | BindingFlags.Static)
+            ?.Invoke(null, [manager]);
     }
 
     private static void MarkModLoadingSkipped(Assembly assembly)

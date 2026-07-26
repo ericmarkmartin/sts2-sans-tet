@@ -78,28 +78,40 @@ The `phase-b-startup` command implements this experiment. It also marks
 `ModManager` as skipped because `ModelDb.Init()` otherwise refuses to enumerate
 models until mod initialization has completed.
 
-The experiment currently reaches model initialization, then terminates in
-native Godot interop. `ModelIdSerializationCache.Init()` logs through
+The original cache initializer terminates in native Godot interop:
+`ModelIdSerializationCache.Init()` uses `Godot.Mathf` and logs through
 `MegaCrit.Sts2.Core.Logging.Log`; the logger initializes `Godot.OS`, whose
-managed wrapper calls native callbacks that only the Godot engine installs.
-This is a process-level access violation/SIGSEGV, not a catchable .NET
-exception. It reproduces both:
+managed wrapper calls callbacks that only the engine installs.
 
-- on Linux while resolving the installed Windows `GodotSharp.dll`; and
-- in a self-contained Windows .NET 9 host with the matching Windows assembly.
+The standalone host now mirrors that initializer with managed math, the exact
+runtime `System.IO.Hashing.XxHash32`, and reflection over the game's private
+cache collections. It also turns on the game's test mode and installs the
+minimal in-memory progress graph needed by the default test player. Run:
 
-Therefore resolving the real `GodotSharp.dll` is sufficient for type loading
-but **not** for executing arbitrary game methods outside Godot.
+```bash
+dotnet run --project headless -- phase-b-startup \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+```
+
+This now exits zero after `RunState.CreateForTest(...)`. On game `v0.107.1` it
+reports 1,624 model types, 20 categories, 1,622 unique entries, 57 epochs, and
+cache hash `3954186980`, exactly matching the rendered build.
+
+`phase-b-manager` continues into `RunManager.SetUpTest(...)` with a host-owned
+no-op `INetGameService`. It remains an intentionally unsafe diagnostic:
+construction reaches native Godot while initializing shared run services and
+currently exits with SIGSEGV. The next investigation is the constructor set in
+`RunManager.InitializeShared`, not model loading or run-state construction.
 
 ### Recommended next decision
 
 Before implementing combat, serialization, or Python plumbing, choose and
 benchmark one of these:
 
-1. Build a minimal replacement `GodotSharp` stub assembly. Start with the exact
-   surface reached by model bootstrap (`OS`, `StringName`, `Mathf`, and logging
-   dependencies), then grow it from observed failures. This preserves the
-   standalone-process goal but the total stubbing surface is still unknown.
+1. Decompose `RunManager.InitializeShared` and replace only the first
+   engine-bound collaborator with a host-owned implementation, as already done
+   for model-cache initialization, saves, and networking. This preserves the
+   standalone-process goal while keeping the stub surface evidence-driven.
 2. Run the actual game executable with Godot's `--headless` display driver and
    a thin in-engine bridge. This is less pure, but validates achievable
    throughput and gameplay automation before paying the stubbing cost.
