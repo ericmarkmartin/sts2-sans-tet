@@ -191,6 +191,43 @@ sha256sum "$episode_dir/replays/"*.mcr
 
 Each replay SHA-256 in `manifest.json` must match `sha256sum`.
 
+Run the offline validator for a complete consistency check:
+
+```bash
+nix develop "path:$PWD" -c python headless/validate_episode.py "$episode_dir"
+```
+
+It checks required artifacts, JSON/JSONL structure, contiguous action/result
+linkage, binary grade consistency, artifact path containment, replay sizes, and
+replay SHA-256 hashes. It never launches or modifies the game.
+
+## Render archived combats to MP4
+
+The episode-level wrapper renders every archived combat, retaining both the
+Godot AVI intermediate and the final MP4:
+
+```bash
+./headless/render_episode_replays.sh "$episode_dir"
+```
+
+Render only selected combats:
+
+```bash
+./headless/render_episode_replays.sh "$episode_dir" \
+  --combat 0 --combat 1 --combat 2
+```
+
+Use `--dry-run` to inspect the PowerShell, FFmpeg, and ffprobe commands without
+launching the game or writing output. Existing MP4s are skipped by default;
+`--force` replaces both AVI and MP4 outputs. The wrapper never deletes AVI
+intermediates.
+
+For permission-managed Codex sessions, approve the stable
+`./headless/render_episode_replays.sh` command prefix once rather than each
+nested game/FFmpeg command. Likewise, use `./headless/run_episode.sh` for future
+episode runs and `./headless/verify_environment.sh` for read-only prerequisite
+checks.
+
 ## Failure recovery
 
 - **Port already accepting connections:** inspect and stop only the stale
@@ -214,13 +251,14 @@ Copy this prompt from the repository root:
 Follow headless/END_TO_END_REPLAY.md exactly. Verify the installed game and both
 mods, building/installing the bootstrap mod if necessary. Resolve the active
 modded profile's latest.mcr path from local files or the game log. Run one full
-HEADLESSBENCH episode with policy seed 0 from act entry through game over,
+HEADLESSBENCH episode with policy seed 0 using headless/run_episode.sh from act
+entry through game over,
 archiving every built-in combat replay. Verify initial.state, actions.jsonl,
 results.jsonl, manifest version/build hashes, game.log, and every .mcr SHA-256
-linkage. Then render each archived combat replay with
-headless/render_combat_replay.ps1, transcode each AVI to H.264/AAC MP4 with
-FFmpeg, use ffprobe plus representative extracted frames to validate each
-output, and report the clickable episode directory. State explicitly whether
-the source replay contains checksum samples. Preserve unrelated changes and
-stop only the exact game process launched by the runner.
+linkage with headless/validate_episode.py. Then render each archived combat
+replay with headless/render_episode_replays.sh, use representative extracted
+frames to visually validate each output, and report the clickable episode
+directory. State explicitly whether the source replay contains checksum
+samples. Preserve unrelated changes and stop only the exact game process
+launched by the runner.
 ```

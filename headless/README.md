@@ -130,6 +130,25 @@ listener on port 15526, archives one `.mcr` per combat, records all actions and
 states, writes version/build hashes into the manifest, and terminates the exact
 Windows game process that it launched.
 
+For a stable command boundary, invoke the same full-run workflow through:
+
+```bash
+./headless/run_episode.sh --mcr-source "<active-profile>/replays/latest.mcr"
+```
+
+Validate an existing episode without launching the game:
+
+```bash
+nix develop "path:$PWD" -c python headless/validate_episode.py \
+  headless/episodes/episode-0001
+```
+
+Render its archived combat replays after simulation:
+
+```bash
+./headless/render_episode_replays.sh headless/episodes/episode-0001
+```
+
 The companion mod adds two headless lifecycle actions to the existing
 singleplayer bridge:
 

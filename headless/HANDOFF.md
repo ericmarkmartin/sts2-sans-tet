@@ -67,10 +67,10 @@ Status as of 2026-07-26 on branch `headless-godot-bootstrap`.
 
 These tasks need no game launch and should not require permission prompts:
 
-1. Add tests for episode allocation, JSONL linkage, binary grading, tactical
-   action selection, and manifest validation.
-2. Add an offline episode validator that checks required files, JSONL indices,
-   replay/video hashes, terminal outcome, and grade consistency.
+1. Extend tests beyond the completed manifest-validation suite to episode
+   allocation and tactical action selection.
+2. Extend the offline episode validator to verify video hashes once rendered
+   video entries are added to the manifest.
 3. Refactor the runner into smaller policy, artifact, process, and protocol
    modules while retaining CLI compatibility.
 4. Update all documentation and the fresh-session prompt to cover MP4 output.
@@ -80,12 +80,12 @@ These tasks need no game launch and should not require permission prompts:
 
 ### One reusable approval per command family
 
-Package external operations behind stable repository scripts, then approve the
-script paths rather than every expanded command:
+External operations are now packaged behind stable repository scripts. Review
+and approve the script paths rather than every expanded command:
 
-1. `headless/run_episode.sh`: verify/build/install mods and run one episode.
+1. `headless/run_episode.sh`: run one episode without installing mods.
 2. `headless/render_episode_replays.sh`: render selected MCRs, transcode,
-   validate, and update the manifest.
+   and validate their streams. Manifest video updates remain future work.
 3. `headless/verify_environment.sh`: read-only game/mod/version checks.
 
 Good reusable approval prefixes after those scripts are reviewed:
@@ -117,9 +117,10 @@ These need the rendered game and therefore at least one reusable approval:
 
 ## Suggested autonomous sequence
 
-1. Finish documentation and add the offline validator and tests.
-2. Add the three stable wrapper scripts with dry-run and `--help` support.
-3. Review the complete diff and create a checkpoint commit on the existing
+1. Extend the completed offline validator and initial five-test suite.
+2. Exercise the completed wrapper scripts against a fresh episode after their
+   stable prefixes receive one-time approval.
+3. Review the complete diff and create an incremental commit on the existing
    branch.
 4. With one approval for the render wrapper, automate episode-level MP4
    generation and manifest updates.
