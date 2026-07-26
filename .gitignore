@@ -4,6 +4,10 @@ decompiled/
 # Build outputs
 mod/bin/
 mod/obj/
+headless/bin/
+headless/obj/
+godot_bootstrap/bin/
+godot_bootstrap/obj/
 
 # Python
 .venv/
@@ -12,6 +16,9 @@ __pycache__/
 
 # Logs
 *.log
+headless/episode-trace.jsonl
+headless/replays/
+headless/episodes/
 
 # IDE
 .vs/

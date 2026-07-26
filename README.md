@@ -22,6 +22,11 @@ The random agent dies fast (floor 2-6), so later-game states (bosses, act transi
 
 ## Quick Start
 
+For the validated Godot-headless combat simulation plus built-in `.mcr` replay
+workflow, use [headless/END_TO_END_REPLAY.md](headless/END_TO_END_REPLAY.md).
+It is the canonical fresh-session runbook and includes a copy-paste Codex
+prompt.
+
 ### Prerequisites
 - Slay the Spire 2 (Steam, Windows)
 - .NET 9 SDK

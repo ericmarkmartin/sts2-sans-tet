@@ -1,0 +1,108 @@
+diff --git a/McpMod.Actions.cs b/McpMod.Actions.cs
+index 0000000..0000000 100644
+--- a/McpMod.Actions.cs
++++ b/McpMod.Actions.cs
+@@ -109,7 +109,7 @@ public static partial class McpMod
+     {
+         if (!CombatManager.Instance.IsInProgress)
+             return Error("Not in combat");
+-        if (!CombatManager.Instance.IsPlayPhase)
++        if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+             return Error("Not in play phase - cannot act during enemy turn");
+         if (CombatManager.Instance.PlayerActionsDisabled)
+             return Error("Player actions are currently disabled");
+@@ -164,7 +164,7 @@ public static partial class McpMod
+     {
+         if (!CombatManager.Instance.IsInProgress)
+             return Error("Not in combat");
+-        if (!CombatManager.Instance.IsPlayPhase)
++        if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+             return Error("Not in play phase - cannot act during enemy turn");
+         if (CombatManager.Instance.PlayerActionsDisabled)
+             return Error("Player actions are currently disabled (turn may already be ending)");
+@@ -207,7 +207,7 @@ public static partial class McpMod
+         {
+             if (!inCombat)
+                 return Error($"Potion '{SafeGetText(() => potion.Title)}' can only be used in combat");
+-            if (!CombatManager.Instance.IsPlayPhase)
++            if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+                 return Error("Cannot use potions outside of play phase");
+         }
+         else if (potion.Usage == PotionUsage.Automatic)
+@@ -376,7 +376,7 @@ public static partial class McpMod
+             var merchUI = NMerchantRoom.Instance;
+             if (merchUI?.Inventory != null && !merchUI.Inventory.IsOpen)
+                 merchUI.OpenInventory();
+-            inventory = merchantRoom.Inventory;
++            inventory = merchantRoom.GetLocalInventory();
+         }
+         else if (player.RunState.CurrentRoom is EventRoom eventRoom
+                  && eventRoom.CanonicalEvent is FakeMerchant
+@@ -1358,7 +1358,7 @@ public static partial class McpMod
+         };
+     }
+ 
+-    private static Creature? ResolveTarget(CombatState combatState, string entityId)
++    private static Creature? ResolveTarget(ICombatState combatState, string entityId)
+     {
+         // Try to match by entity_id pattern: "model_entry_N"
+         // First try matching by combat_id if it's a pure number
+diff --git a/McpMod.MultiplayerActions.cs b/McpMod.MultiplayerActions.cs
+index 0000000..0000000 100644
+--- a/McpMod.MultiplayerActions.cs
++++ b/McpMod.MultiplayerActions.cs
+@@ -68,7 +68,7 @@ public static partial class McpMod
+     {
+         if (!CombatManager.Instance.IsInProgress)
+             return Error("Not in combat");
+-        if (!CombatManager.Instance.IsPlayPhase)
++        if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+             return Error("Not in play phase - cannot act during enemy turn");
+         if (CombatManager.Instance.PlayerActionsDisabled)
+             return Error("Player actions are currently disabled");
+@@ -101,7 +101,7 @@ public static partial class McpMod
+     {
+         if (!CombatManager.Instance.IsInProgress)
+             return Error("Not in combat");
+-        if (!CombatManager.Instance.IsPlayPhase)
++        if (player.PlayerCombatState?.Phase != PlayerTurnPhase.Play)
+             return Error("Not in play phase - cannot act during enemy turn");
+         if (CombatManager.Instance.PlayerActionsDisabled)
+             return Error("Player actions are currently disabled");
+diff --git a/McpMod.MultiplayerState.cs b/McpMod.MultiplayerState.cs
+index 0000000..0000000 100644
+--- a/McpMod.MultiplayerState.cs
++++ b/McpMod.MultiplayerState.cs
+@@ -256,7 +256,8 @@ public static partial class McpMod
+ 
+         battle["round"] = combatState.RoundNumber;
+         battle["turn"] = combatState.CurrentSide.ToString().ToLower();
+-        battle["is_play_phase"] = CombatManager.Instance.IsPlayPhase;
++        battle["is_play_phase"] = LocalContext.GetMe(runState)?.PlayerCombatState?.Phase
++            == PlayerTurnPhase.Play;
+         battle["all_players_ready"] = CombatManager.Instance.AllPlayersReadyToEndTurn();
+ 
+         // Enemies
+diff --git a/McpMod.StateBuilder.cs b/McpMod.StateBuilder.cs
+index 0000000..0000000 100644
+--- a/McpMod.StateBuilder.cs
++++ b/McpMod.StateBuilder.cs
+@@ -266,7 +266,8 @@ public static partial class McpMod
+ 
+         battle["round"] = combatState.RoundNumber;
+         battle["turn"] = combatState.CurrentSide.ToString().ToLower();
+-        battle["is_play_phase"] = CombatManager.Instance.IsPlayPhase;
++        battle["is_play_phase"] = LocalContext.GetMe(runState)?.PlayerCombatState?.Phase
++            == PlayerTurnPhase.Play;
+ 
+         // Enemies
+         var enemies = new List<Dictionary<string, object?>>();
+@@ -724,7 +725,7 @@ public static partial class McpMod
+     {
+         var state = new Dictionary<string, object?>();
+ 
+-        var inventory = merchantRoom.Inventory;
++        var inventory = merchantRoom.GetLocalInventory();
+         if (inventory == null)
+         {
+             state["items"] = new List<Dictionary<string, object?>>();
