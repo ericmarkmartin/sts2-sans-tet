@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -22,8 +23,12 @@ internal static class Program
             {
                 "probe" => Probe(host),
                 "inspect" => Inspect(host, options.TypeName),
-                "phase-b-startup" => PhaseBStartup(host, initializeManager: false),
-                "phase-b-manager" => PhaseBStartup(host, initializeManager: true),
+                "phase-b-startup" => PhaseBStartup(
+                    host, initializeManager: false, enterCombat: false),
+                "phase-b-manager" => PhaseBStartup(
+                    host, initializeManager: true, enterCombat: false),
+                "phase-c-combat" => PhaseBStartup(
+                    host, initializeManager: true, enterCombat: true),
                 "stdio" => Stdio(host),
                 _ => throw new ArgumentException($"Unknown command: {options.Command}")
             };
@@ -37,9 +42,15 @@ internal static class Program
 
     private static int PhaseBStartup(
         GameAssemblyHost host,
-        bool initializeManager)
+        bool initializeManager,
+        bool enterCombat)
     {
         var assembly = host.LoadGameAssembly();
+        StandaloneRuntimePatches.Install(assembly);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "standalone_runtime_patches_installed"
+        }));
         EnableGameTestMode(assembly);
         MarkModLoadingSkipped(assembly);
         var modelDbType = assembly.GetType("MegaCrit.Sts2.Core.Models.ModelDb", throwOnError: true)!;
@@ -72,9 +83,10 @@ internal static class Program
         // Reflection does not apply optional parameter defaults. Null selects the
         // game's default player/acts/modifiers; 0 is GameMode.Standard. Supply a
         // seed explicitly so SeedHelper does not consult engine-backed entropy.
+        var players = CreateStandalonePlayers(assembly);
         var state = createForTest.Invoke(
                 null,
-                [null, null, null, 0, 0, "HEADLESSBENCH"])
+                [players, null, null, 0, 0, "HEADLESSBENCH"])
             ?? throw new InvalidOperationException("CreateForTest returned null");
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -85,7 +97,13 @@ internal static class Program
             return 0;
 
         var managerType = assembly.GetType(RunManagerTypeName, throwOnError: true)!;
-        var manager = Activator.CreateInstance(managerType, nonPublic: true)!;
+        // Combat and command code consistently resolves RunManager.Instance.
+        // Configure that canonical singleton instead of creating a second,
+        // split-brain manager that only the host knows about.
+        var manager = managerType.GetProperty(
+                "Instance", BindingFlags.Public | BindingFlags.Static)
+            ?.GetValue(null)
+            ?? throw new MissingMemberException(managerType.FullName, "Instance");
         var netService = CreateStandaloneNetService(assembly);
         Console.WriteLine(JsonSerializer.Serialize(new
         {
@@ -101,7 +119,164 @@ internal static class Program
             stage = "run_launched",
             same_state = ReferenceEquals(state, launchedState)
         }));
+        if (enterCombat)
+            EnterTestCombat(assembly, manager);
         return 0;
+    }
+
+    private static Array CreateStandalonePlayers(Assembly assembly)
+    {
+        var playerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Entities.Players.Player",
+            throwOnError: true)!;
+        var characterType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Models.Characters.Ironclad",
+            throwOnError: true)!;
+        var modelDbType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Models.ModelDb", throwOnError: true)!;
+        var getModel = modelDbType.GetMethod(
+                "Get",
+                BindingFlags.NonPublic | BindingFlags.Static,
+                binder: null,
+                types: [typeof(Type)],
+                modifiers: null)
+            ?? throw new MissingMethodException(modelDbType.FullName, "Get(Type)");
+        var character = getModel.Invoke(null, [characterType])
+            ?? throw new InvalidOperationException("Ironclad lookup returned null");
+        var unlockStateType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Unlocks.UnlockState",
+            throwOnError: true)!;
+        var allUnlocks = unlockStateType.GetField(
+                "all", BindingFlags.Public | BindingFlags.Static)
+            ?.GetValue(null)
+            ?? throw new MissingFieldException(unlockStateType.FullName, "all");
+        var createPlayer = playerType.GetMethods(
+                BindingFlags.Public | BindingFlags.Static)
+            .Single(method =>
+                method.Name == "CreateForNewRun"
+                && !method.IsGenericMethod
+                && method.GetParameters().Length == 3);
+        var player = createPlayer.Invoke(null, [character, allUnlocks, 1UL])
+            ?? throw new InvalidOperationException(
+                "Player.CreateForNewRun returned null");
+        var players = Array.CreateInstance(playerType, 1);
+        players.SetValue(player, 0);
+        return players;
+    }
+
+    private static void EnterTestCombat(Assembly assembly, object manager)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "test_combat_entry_started"
+        }));
+        var encounterType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Models.Encounters.FuzzyWurmCrawlerWeak",
+            throwOnError: true)!;
+        var modelDbType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Models.ModelDb", throwOnError: true)!;
+        var getModel = modelDbType.GetMethod(
+                "Get",
+                BindingFlags.NonPublic | BindingFlags.Static,
+                binder: null,
+                types: [typeof(Type)],
+                modifiers: null)
+            ?? throw new MissingMethodException(modelDbType.FullName, "Get(Type)");
+        var canonicalEncounter = getModel.Invoke(null, [encounterType])
+            ?? throw new InvalidOperationException("Encounter lookup returned null");
+        var encounter = canonicalEncounter.GetType().GetMethod("ToMutable")
+            ?.Invoke(canonicalEncounter, null)
+            ?? throw new MissingMethodException(
+                canonicalEncounter.GetType().FullName, "ToMutable");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "test_encounter_created",
+            encounter = encounterType.FullName
+        }));
+        var roomType = encounter.GetType().GetProperty("RoomType")?.GetValue(encounter)
+            ?? throw new MissingMemberException(
+                encounter.GetType().FullName, "RoomType");
+        var mapPointType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Map.MapPointType", throwOnError: true)!;
+        var unassigned = Enum.Parse(mapPointType, "Unassigned");
+        var enterRoom = manager.GetType().GetMethod("EnterRoomDebug")
+            ?? throw new MissingMethodException(
+                manager.GetType().FullName, "EnterRoomDebug");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "test_combat_enter_room_invoking"
+        }));
+        var task = enterRoom.Invoke(
+                manager, [roomType, unassigned, encounter, false]) as Task
+            ?? throw new InvalidOperationException(
+                "EnterRoomDebug did not return a Task");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "test_combat_enter_room_task_created",
+            task_status = task.Status.ToString()
+        }));
+        if (!task.Wait(TimeSpan.FromSeconds(10)))
+            throw new TimeoutException("Standalone combat entry exceeded 10 seconds");
+        task.GetAwaiter().GetResult();
+
+        var combatManagerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Combat.CombatManager", throwOnError: true)!;
+        var combatManager = combatManagerType.GetProperty(
+                "Instance", BindingFlags.Public | BindingFlags.Static)
+            ?.GetValue(null)
+            ?? throw new MissingMemberException(
+                combatManagerType.FullName, "Instance");
+        var combatState = combatManagerType.GetField(
+                "_state", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(combatManager)
+            ?? throw new MissingFieldException(combatManagerType.FullName, "_state");
+        var players = combatState.GetType().GetProperty("Players")?.GetValue(combatState)
+            as IEnumerable
+            ?? throw new MissingMemberException(combatState.GetType().FullName, "Players");
+        var player = players.Cast<object>().Single();
+        var playerCombatState = player.GetType().GetProperty("PlayerCombatState")
+            ?.GetValue(player)
+            ?? throw new MissingMemberException(
+                player.GetType().FullName, "PlayerCombatState");
+        var phase = playerCombatState.GetType().GetProperty("Phase")
+            ?.GetValue(playerCombatState)?.ToString();
+        var handCount = GetPileCardCount(playerCombatState, "Hand");
+        var drawPileCount = GetPileCardCount(playerCombatState, "DrawPile");
+        var enemyCount = CountEnumerable(
+            combatState.GetType().GetProperty("Enemies")?.GetValue(combatState));
+        if (phase != "Play" || handCount != 5 || enemyCount == 0)
+            throw new InvalidOperationException(
+                $"Unexpected opening combat state: phase={phase}, " +
+                $"hand={handCount}, enemies={enemyCount}");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "test_combat_entered",
+            is_starting = combatManagerType.GetProperty("IsStarting")
+                ?.GetValue(combatManager),
+            is_in_progress = combatManagerType.GetProperty("IsInProgress")
+                ?.GetValue(combatManager),
+            phase,
+            hand_count = handCount,
+            draw_pile_count = drawPileCount,
+            enemy_count = enemyCount
+        }));
+    }
+
+    private static int GetPileCardCount(object playerCombatState, string pileName)
+    {
+        var pile = playerCombatState.GetType().GetProperty(pileName)
+            ?.GetValue(playerCombatState)
+            ?? throw new MissingMemberException(
+                playerCombatState.GetType().FullName, pileName);
+        return CountEnumerable(
+            pile.GetType().GetProperty("Cards")?.GetValue(pile));
+    }
+
+    private static int CountEnumerable(object? value)
+    {
+        if (value is not IEnumerable enumerable)
+            throw new InvalidOperationException("Expected an enumerable game value");
+        return enumerable.Cast<object>().Count();
     }
 
     private static object CreateStandaloneNetService(Assembly assembly)
@@ -158,6 +333,13 @@ internal static class Program
                 "CreateDefault", BindingFlags.Public | BindingFlags.Static)
             ?.Invoke(null, null)
             ?? throw new MissingMethodException(progressType.FullName, "CreateDefault");
+        // A fresh profile normally opens tutorial UI during the first combat.
+        // Standalone simulation has no scene tree, so use the game's supported
+        // profile setting to mark FTUE presentation disabled. This affects only
+        // tutorial overlays, not run or combat mechanics.
+        progressType.GetProperty(
+                "EnableFtues", BindingFlags.Public | BindingFlags.Instance)
+            ?.SetValue(progress, false);
         var progressManager = RuntimeHelpers.GetUninitializedObject(progressManagerType);
         progressManagerType.GetField(
                 "<Progress>k__BackingField",

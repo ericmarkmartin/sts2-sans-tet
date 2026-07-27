@@ -15,7 +15,11 @@ game process. It:
    `Godot.Mathf` or the Godot-backed logger;
 6. assigns canonical model IDs;
 7. installs the minimal in-memory progress graph read by `Player`; and
-8. creates a deterministic `RunState` with seed `HEADLESSBENCH`.
+8. creates a deterministic Ironclad `RunState` with seed `HEADLESSBENCH`;
+9. initializes and launches the canonical `RunManager.Instance`; and
+10. enters a Fuzzy Wurm/Crawler combat through the normal room lifecycle,
+    executes start-of-combat hooks, draws five cards, generates a checksum, and
+    reaches player play phase.
 
 Observed cache result:
 
@@ -39,39 +43,43 @@ changes the serialized cache hash.
 | `ModManager` initialization | Marked `Skipped`; no mods loaded |
 | `Godot.Mathf.CeilToInt` | Managed `Math.Ceiling(Math.Log2(...))` |
 | cache `Log.Info` | Omitted; milestone emitted as JSON |
+| logger editor probe | Harmony prefix selects the console logger without calling `Godot.OS` |
 | `System.IO.Hashing.XxHash32` | Loaded from the game data directory and invoked exactly |
-| `SaveManager` | Uninitialized narrow graph containing default `ProgressState` |
-| `INetGameService` | `DispatchProxy` no-op service for the manager experiment |
+| `SaveManager` | Uninitialized narrow graph containing default `ProgressState`; FTUE presentation disabled |
+| `INetGameService` | `DispatchProxy` no-op singleplayer service |
+| visual waits and nodes | Suppressed by the game's `TestMode` / `NonInteractiveMode` branches |
 
-These are probe-only compatibility seams. They fail on missing private fields
-or methods rather than silently accepting a changed game assembly.
+These compatibility seams fail on missing private fields or methods rather than
+silently accepting a changed game assembly. FTUE suppression changes tutorial
+overlays only. All mechanics-bearing shared services remain the game's real
+implementations; see `SHARED_SERVICE_INVENTORY.md`.
 
-## Current failing boundary
+## Current boundary
 
-`phase-b-manager` continues after `RunState` construction and calls
-`RunManager.SetUpTest(...)`. It creates the standalone network proxy, then
-terminates with SIGSEGV inside the shared run-service initialization path.
-Because native Godot callbacks are uninstalled, this is not a catchable managed
-exception.
+`phase-b-manager` and `phase-c-combat` both exit zero. The combat command uses
+the canonical `RunManager.Instance`; this is required because combat and command
+code resolve that singleton internally. It explicitly constructs an Ironclad
+player with the all-unlocked test state because `RunState.CreateForTest()` uses
+the deckless `Deprived` character when its player argument is omitted.
 
-The next task is to split or reproduce `RunManager.InitializeShared` one
-collaborator at a time and identify the first constructor that invokes Godot.
-Likely candidates are the synchronization/action services constructed before
-`ActionExecutor.Pause()`. Do not start protocol or Gym work until manager setup
-and at least one logic action complete without native calls.
+The next gate is one complete logic action: expose the authoritative hand and
+targets, submit a legal card play through the normal game-action path, end the
+turn, and assert resulting HP/energy/pile/checksum transitions. State and legal
+action serialization should follow the models, not scene nodes.
 
 ## Commands
 
-Safe successful boundary:
+Successful startup and manager boundaries:
 
 ```bash
 dotnet run --project headless -- phase-b-startup \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
-```
-
-Unsafe crash-localization boundary:
-
-```bash
 dotnet run --project headless -- phase-b-manager \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
+dotnet run --project headless -- phase-c-combat \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
 ```
+
+Set `STS2_STANDALONE_TRACE=1` to install read-only Harmony prefixes that emit
+managed method-boundary milestones. This is intended only to localize native
+callback failures and does not skip the traced game methods.

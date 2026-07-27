@@ -62,7 +62,7 @@ This clears Phase A's construction gate, but it does **not** yet establish that
 run startup or combat can proceed without Godot's scene tree and native runtime.
 Those are Phase B gates.
 
-## Phase B findings and current blocker
+## Standalone findings and current boundary
 
 The original plan assumes a `RunManager.StartRun(...)` entrypoint. The shipped
 assembly has no such API. The intended pure-logic test seam is:
@@ -98,27 +98,29 @@ reports 1,624 model types, 20 categories, 1,622 unique entries, 57 epochs, and
 cache hash `3954186980`, exactly matching the rendered build.
 
 `phase-b-manager` continues into `RunManager.SetUpTest(...)` with a host-owned
-no-op `INetGameService`. It remains an intentionally unsafe diagnostic:
-construction reaches native Godot while initializing shared run services and
-currently exits with SIGSEGV. The next investigation is the constructor set in
-`RunManager.InitializeShared`, not model loading or run-state construction.
+no-op singleplayer `INetGameService` and now exits zero. The host selects the
+game logger's console backend before its static initializer can query
+`Godot.OS`; the real shared action, checksum, synchronization, and replay
+services are retained.
 
-### Recommended next decision
+`phase-c-combat` goes further: it creates a normal Ironclad starter deck,
+launches the canonical `RunManager.Instance`, enters a deterministic encounter,
+draws the opening hand, generates the normal checksum, and reaches player play
+phase without starting Godot:
 
-Before implementing combat, serialization, or Python plumbing, choose and
-benchmark one of these:
+```bash
+dotnet run --project headless -- phase-c-combat \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+```
 
-1. Decompose `RunManager.InitializeShared` and replace only the first
-   engine-bound collaborator with a host-owned implementation, as already done
-   for model-cache initialization, saves, and networking. This preserves the
-   standalone-process goal while keeping the stub surface evidence-driven.
-2. Run the actual game executable with Godot's `--headless` display driver and
-   a thin in-engine bridge. This is less pure, but validates achievable
-   throughput and gameplay automation before paying the stubbing cost.
+The next standalone gate is submitting one legal card play and end-turn action,
+then asserting authoritative combat-state transitions. See
+[STANDALONE_STATUS.md](STANDALONE_STATUS.md) and
+[SHARED_SERVICE_INVENTORY.md](SHARED_SERVICE_INVENTORY.md).
 
-Do not proceed to protocol-parity work until one path can initialize `ModelDb`
-and construct a `RunState`; otherwise Phases C–E would only produce plumbing
-around a backend that cannot reset.
+The Godot-headless path remains the end-to-end reference and replay renderer.
+The standalone path is now viable enough to pursue in parallel, but should not
+grow a protocol until a real card play and end-turn transition pass.
 
 ## Working Godot-headless reference path
 

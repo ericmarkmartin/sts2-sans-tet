@@ -17,7 +17,7 @@ This is now a two-track investigation:
 Do not build protocol or Gym plumbing around a backend until that backend can
 reset a run and execute at least one complete combat.
 
-## Current status (2026-07-26)
+## Current status (2026-07-27)
 
 - Phase A passed: `sts2.dll` loads in .NET 9, all types required by the probe
   resolve, and `MegaCrit.Sts2.Core.Runs.RunManager` constructs successfully.
@@ -31,14 +31,27 @@ reset a run and execute at least one complete combat.
   construction. Against `v0.107.1`, it reproduces the rendered game's cache
   counts and hash exactly: 20 categories, 1,622 entries, 57 epochs, hash
   `3954186980`.
-- The next standalone boundary is `RunManager.SetUpTest(...)`.
-  `phase-b-manager` constructs a host-owned no-op `INetGameService`, but setup
-  still reaches native Godot and exits with SIGSEGV while building shared run
-  services. Static analysis of the constructors in `InitializeShared` is the
-  next task.
-- This native failure reproduces in both Linux .NET and a self-contained
-  Windows .NET 9 host. Resolving the real `GodotSharp.dll` is enough for managed
-  type loading, but not for executing arbitrary game methods.
+- Standalone manager setup now passes. A narrow pre-initialization patch keeps
+  the game's logger on its console backend instead of querying the uninstalled
+  Godot editor callback. `RunManager.SetUpTest(...)` and `Launch()` retain the
+  complete shared mechanics graph: action queues/executor, checksum tracking,
+  player choices, map/event/reward/rest synchronization, combat state
+  synchronization, and replay writing.
+- `phase-c-combat` now enters a real deterministic Ironclad combat, performs
+  start-of-combat hooks, draws the opening hand, generates the normal checksum,
+  and reaches player play phase without starting Godot. Two host correctness
+  fixes were required: configure the canonical `RunManager.Instance` rather
+  than a second manager, and explicitly create an Ironclad player because the
+  game's default `CreateForTest` character (`Deprived`) intentionally has no
+  starter deck.
+- The standalone save graph disables FTUE presentation through the game's
+  normal profile setting. This prevents tutorial nodes from being requested;
+  it does not alter mechanics. `TestMode` supplies the game's intended
+  noninteractive timing and visual-suppression behavior.
+- Earlier native callback failures reproduced in both Linux .NET and a
+  self-contained Windows .NET 9 host. Resolving the real `GodotSharp.dll` is
+  enough for managed type loading, but engine callbacks still require either
+  the running engine or an explicitly isolated compatibility seam.
 - The compatibility probe and detailed findings live in `headless/`.
 - The repository now has a pinned `nix develop` shell with .NET 9, Python 3.11,
   and `uv`.
@@ -134,7 +147,7 @@ run on the same machine when possible.
 - If it is too expensive, use the failure traces below to scope a standalone
   stub assembly before proceeding.
 
-### Phase B1 — Standalone model bootstrap  (passed through RunState)
+### Phase B1 — Standalone model/bootstrap  (passed through player-ready combat)
 
 **Goal:** initialize `ModelDb` and create a `RunState` without native Godot.
 
@@ -148,23 +161,23 @@ Known required sequence:
 6. `RunManager.SetUpTest(...)`.
 7. `RunManager.Launch()`.
 
-The working host currently bypasses only the model-cache `Mathf` and logging
-calls rather than replacing all of `GodotSharp.dll`. Continue growing
-host-owned interfaces from observed call paths. Maintain a machine-readable
-inventory of every bypassed or implemented member and its game call path.
+The working host bypasses the model-cache `Mathf` calls, selects the console
+logger before its static initializer, and uses the game's test/noninteractive
+paths to suppress visuals and waits. It does not replace `GodotSharp.dll` or
+remove semantic shared services. Continue growing host-owned interfaces from
+observed call paths and keep the compatibility inventory current.
 
 **Stop condition:** if reaching `RunState` requires broad scene-tree,
 resource-loading, or generated Godot binding behavior, reassess the standalone
 approach rather than recreating Godot piecemeal.
 
-### Phase B2 — Drive one combat turn  (after B0 or B1)
+### Phase B2 — Drive one combat turn  (in progress)
 
 **Goal:** start a run, enter combat, play a card, end turn, observe result — all in-process, no JSON yet.
 
 **Steps:**
-1. Use `RunState.CreateForTest(...)` and `RunManager.SetUpTest(...)` for the
-   standalone path, or the existing menu/run automation for Godot-headless.
-2. Advance to combat state. May need to stub or skip Godot-driven timing (`NonInteractiveMode.IsActive = true`, `FastMode = Instant`).
+1. Use the passing `phase-c-combat` startup through player play phase.
+2. Serialize the authoritative combat state and enumerate legal actions.
 3. Locate `CombatManager`, read the player's hand, call `PlayCard(...)` on a card, call `EndTurn()`.
 4. Verify HP/enemy state changed as expected.
 
