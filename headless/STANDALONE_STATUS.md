@@ -65,7 +65,9 @@ the deckless `Deprived` character when its player argument is omitted.
 The next gate is one complete logic action: expose the authoritative hand and
 targets, submit a legal card play through the normal game-action path, end the
 turn, and assert resulting HP/energy/pile/checksum transitions. State and legal
-action serialization should follow the models, not scene nodes.
+action serialization should follow the models, not scene nodes. Native `.mcr`
+writing is not yet active because the game disables `CombatReplayWriter` in
+`TestMode`; the Godot-headless path remains the replay reference.
 
 ## Commands
 

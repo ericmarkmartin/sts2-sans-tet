@@ -24,11 +24,14 @@ an agent needs. Engine-only presentation is isolated at narrower boundaries.
 | `TreasureRoomRelicSynchronizer` | Preserves treasure-room relic choices |
 | `OneOffSynchronizer` | Preserves miscellaneous synchronized decisions |
 | `RunLocationTargetedMessageBuffer` | Preserves location-scoped ordering |
-| `CombatReplayWriter` | Preserves the game's native combat provenance path |
+| `CombatReplayWriter` | Keeps the native provenance implementation available; `TestMode` currently leaves `IsEnabled` false |
 | `AscensionManager` | Preserves ascension rule application |
 
 These services are constructed by the game and are not replaced by host-owned
-implementations.
+implementations. Construction alone does not imply every service is active:
+the current standalone probe relies on `TestMode`, which disables native `.mcr`
+recording. Enabling that safely or recording an equivalent authoritative action
+stream remains a separate milestone.
 
 ## Presentation/input services
 
@@ -68,4 +71,3 @@ effects, and audio need not enter the policy observation. If an evaluation
 intentionally restricts information available to a human player, that
 restriction belongs in the observation serializer, not in the simulator's
 internal service graph.
-

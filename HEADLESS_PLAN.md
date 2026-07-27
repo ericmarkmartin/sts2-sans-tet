@@ -36,7 +36,9 @@ reset a run and execute at least one complete combat.
   Godot editor callback. `RunManager.SetUpTest(...)` and `Launch()` retain the
   complete shared mechanics graph: action queues/executor, checksum tracking,
   player choices, map/event/reward/rest synchronization, combat state
-  synchronization, and replay writing.
+  synchronization, and the replay-writer service. The writer is currently
+  disabled by the game's `TestMode`, so standalone `.mcr` output is not yet a
+  passing capability.
 - `phase-c-combat` now enters a real deterministic Ironclad combat, performs
   start-of-combat hooks, draws the opening hand, generates the normal checksum,
   and reaches player play phase without starting Godot. Two host correctness
