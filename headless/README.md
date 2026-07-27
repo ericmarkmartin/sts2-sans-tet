@@ -31,16 +31,13 @@ The probe writes newline-delimited JSON milestones to stdout and diagnostics to
 stderr. Exit code 0 means `RunManager` was constructed; exit code 2 means the
 assembly and type loaded but construction failed.
 
-## Minimal stdio smoke test
+## Persistent stdio simulator
 
-The protocol shell currently exposes only `health` and `shutdown`; gameplay
-commands must not be added until the Phase A construction result establishes
-which runtime services need hosting.
-
-```text
-{"cmd":"health"}
-{"cmd":"shutdown"}
-```
+The standalone process now supports `health`, `reset`, `observe`, validated
+`step` actions (`play_card` and `end_turn`), and `shutdown`. Reset can be called
+repeatedly without restarting the process. See
+[STDIO_PROTOCOL.md](STDIO_PROTOCOL.md) for the request/response contract and
+current scope.
 
 ## Phase A findings
 

@@ -77,7 +77,13 @@ the models and active choice contexts, not scene nodes. The first combat schema,
 `sts2.standalone.combat.v1`, now exposes an explicitly
 `omniscient_authoritative` observation with numeric card variables, all piles,
 enemy intent damage, and legal card/target pairs. The next gate is accepting
-those identities through stdio and recording pre/post observations. Native `.mcr`
+those identities through stdio and recording pre/post observations.
+
+The stdio gate now passes too: one process supports deterministic `reset`,
+`observe`, `play_card`, `end_turn`, warm reset, and `shutdown`, with echoed
+request IDs. Every step is checked against the current legal-action set before
+mutation. The remaining episode milestone is writing each accepted action and
+pre/post observation to the standard episode directory. Native `.mcr`
 writing is not yet active because the game disables `CombatReplayWriter` in
 `TestMode`; the Godot-headless path remains the replay reference.
 

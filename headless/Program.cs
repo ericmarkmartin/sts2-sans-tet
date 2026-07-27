@@ -56,6 +56,20 @@ internal static class Program
         bool driveActionCycle,
         bool emitObservation)
     {
+        var assembly = InitializeStandaloneAssembly(host);
+        var state = CreateStandaloneRunState(assembly, "HEADLESSBENCH");
+        if (!initializeManager)
+            return 0;
+        var manager = SetupStandaloneManager(assembly, state, enterCombat);
+        if (driveActionCycle)
+            RunScriptedActionCycle(assembly, manager);
+        if (emitObservation)
+            WriteObservation(assembly, manager);
+        return 0;
+    }
+
+    private static Assembly InitializeStandaloneAssembly(GameAssemblyHost host)
+    {
         var assembly = host.LoadGameAssembly();
         StandaloneRuntimePatches.Install(assembly);
         Console.WriteLine(JsonSerializer.Serialize(new
@@ -84,7 +98,13 @@ internal static class Program
         {
             stage = "in_memory_save_manager_installed"
         }));
+        return assembly;
+    }
 
+    private static object CreateStandaloneRunState(
+        Assembly assembly,
+        string seed)
+    {
         var runStateType = assembly.GetType("MegaCrit.Sts2.Core.Runs.RunState", throwOnError: true)!;
         var createForTest = runStateType.GetMethod(
             "CreateForTest",
@@ -97,16 +117,22 @@ internal static class Program
         var players = CreateStandalonePlayers(assembly);
         var state = createForTest.Invoke(
                 null,
-                [players, null, null, 0, 0, "HEADLESSBENCH"])
+                [players, null, null, 0, 0, seed])
             ?? throw new InvalidOperationException("CreateForTest returned null");
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             stage = "test_run_state_created",
-            type = state.GetType().FullName
+            type = state.GetType().FullName,
+            seed
         }));
-        if (!initializeManager)
-            return 0;
+        return state;
+    }
 
+    private static object SetupStandaloneManager(
+        Assembly assembly,
+        object state,
+        bool enterCombat)
+    {
         var managerType = assembly.GetType(RunManagerTypeName, throwOnError: true)!;
         // Combat and command code consistently resolves RunManager.Instance.
         // Configure that canonical singleton instead of creating a second,
@@ -132,19 +158,18 @@ internal static class Program
         }));
         if (enterCombat)
             EnterTestCombat(assembly, manager);
-        if (driveActionCycle)
-            RunScriptedActionCycle(assembly, manager);
-        if (emitObservation)
+        return manager;
+    }
+
+    private static void WriteObservation(Assembly assembly, object manager)
+    {
+        SetChecksumTrackingEnabled(manager, true);
+        Console.WriteLine(JsonSerializer.Serialize(new
         {
-            SetChecksumTrackingEnabled(manager, true);
-            Console.WriteLine(JsonSerializer.Serialize(new
-            {
-                stage = "standalone_observation",
-                observation = StandaloneObservationBuilder.Build(
-                    assembly, manager)
-            }));
-        }
-        return 0;
+            stage = "standalone_observation",
+            observation = StandaloneObservationBuilder.Build(
+                assembly, manager)
+        }));
     }
 
     private static Array CreateStandalonePlayers(Assembly assembly)
@@ -753,20 +778,103 @@ internal static class Program
 
     private static int Stdio(GameAssemblyHost host)
     {
-        var assembly = host.LoadGameAssembly();
+        var assembly = InitializeStandaloneAssembly(host);
+        object? manager = null;
+        string? activeSeed = null;
         string? line;
         while ((line = Console.ReadLine()) is not null)
         {
+            JsonElement? requestId = null;
             try
             {
                 using var command = JsonDocument.Parse(line);
                 var name = command.RootElement.GetProperty("cmd").GetString();
-                object response = name switch
+                requestId = command.RootElement.TryGetProperty(
+                    "request_id", out var requestIdElement)
+                    ? requestIdElement.Clone()
+                    : default(JsonElement?);
+                object response;
+                switch (name)
                 {
-                    "health" => new { ok = true, assembly = assembly.GetName().Name },
-                    "shutdown" => new { ok = true },
-                    _ => new { error = $"Unsupported command: {name}" }
-                };
+                    case "health":
+                        response = new
+                        {
+                            ok = true,
+                            request_id = requestId,
+                            assembly = assembly.GetName().Name,
+                            ready = manager is not null,
+                            seed = activeSeed,
+                            schema = StandaloneObservationBuilder.Schema
+                        };
+                        break;
+                    case "reset":
+                    {
+                        var seed = command.RootElement.TryGetProperty(
+                                "seed", out var seedElement)
+                            ? seedElement.GetString()
+                            : null;
+                        seed = string.IsNullOrWhiteSpace(seed)
+                            ? "HEADLESSBENCH"
+                            : seed;
+                        if (manager is not null)
+                        {
+                            manager.GetType().GetMethod("CleanUp")
+                                ?.Invoke(manager, [true]);
+                        }
+                        var state = CreateStandaloneRunState(assembly, seed);
+                        manager = SetupStandaloneManager(
+                            assembly, state, enterCombat: true);
+                        SetChecksumTrackingEnabled(manager, true);
+                        activeSeed = seed;
+                        response = new
+                        {
+                            ok = true,
+                            request_id = requestId,
+                            seed = activeSeed,
+                            observation = StandaloneObservationBuilder.Build(
+                                assembly, manager)
+                        };
+                        break;
+                    }
+                    case "observe":
+                        RequireManager(manager);
+                        response = new
+                        {
+                            ok = true,
+                            request_id = requestId,
+                            seed = activeSeed,
+                            observation = StandaloneObservationBuilder.Build(
+                                assembly, manager!)
+                        };
+                        break;
+                    case "step":
+                        RequireManager(manager);
+                        ExecuteStdioStep(
+                            assembly, manager!, command.RootElement);
+                        response = new
+                        {
+                            ok = true,
+                            request_id = requestId,
+                            seed = activeSeed,
+                            observation = StandaloneObservationBuilder.Build(
+                                assembly, manager!)
+                        };
+                        break;
+                    case "shutdown":
+                        response = new
+                        {
+                            ok = true,
+                            request_id = requestId
+                        };
+                        break;
+                    default:
+                        response = new
+                        {
+                            error = $"Unsupported command: {name}",
+                            request_id = requestId
+                        };
+                        break;
+                }
                 Console.WriteLine(JsonSerializer.Serialize(response));
                 if (name == "shutdown")
                     break;
@@ -776,11 +884,124 @@ internal static class Program
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
                     error = exception.Message,
-                    error_type = exception.GetType().FullName
+                    error_type = exception.GetType().FullName,
+                    request_id = requestId
                 }));
             }
         }
         return 0;
+    }
+
+    private static void ExecuteStdioStep(
+        Assembly assembly,
+        object manager,
+        JsonElement command)
+    {
+        var requestedAction = command.GetProperty("action").GetString()
+            ?? throw new ArgumentException("step requires action");
+        var observation = StandaloneObservationBuilder.Build(assembly, manager);
+        var legalActions = (IEnumerable<Dictionary<string, object?>>)
+            observation["legal_actions"]!;
+
+        if (requestedAction == "play_card")
+        {
+            var cardIndex = command.GetProperty("card_index").GetInt32();
+            ulong? targetId = null;
+            if (command.TryGetProperty(
+                    "target_combat_id", out var targetElement)
+                && targetElement.ValueKind != JsonValueKind.Null)
+            {
+                targetId = targetElement.GetUInt64();
+            }
+            var isLegal = legalActions.Any(action =>
+                Equals(action["action"], "play_card")
+                && Convert.ToInt32(action["card_index"]) == cardIndex
+                && NullableUnsignedEquals(
+                    action["target_combat_id"], targetId));
+            if (!isLegal)
+                throw new InvalidOperationException(
+                    "Requested card/target pair is not a legal action");
+
+            var context = GetCombatContext(assembly);
+            var hand = GetPileCards(context.PlayerCombatState, "Hand");
+            var card = hand[cardIndex];
+            object? target = null;
+            if (targetId.HasValue)
+            {
+                target = GetCombatEnemies(assembly).Single(enemy =>
+                    Convert.ToUInt64(enemy.GetType().GetProperty("CombatId")
+                        ?.GetValue(enemy)) == targetId.Value);
+            }
+            var actionType = assembly.GetType(
+                "MegaCrit.Sts2.Core.GameActions.PlayCardAction",
+                throwOnError: true)!;
+            var action = Activator.CreateInstance(actionType, [card, target])
+                ?? throw new InvalidOperationException(
+                    "Could not create PlayCardAction");
+            SubmitAndWait(manager, action, "card play");
+            return;
+        }
+
+        if (requestedAction == "end_turn")
+        {
+            if (!legalActions.Any(action =>
+                    Equals(action["action"], "end_turn")))
+                throw new InvalidOperationException(
+                    "End turn is not legal at this decision point");
+            var context = GetCombatContext(assembly);
+            var priorTurn = ReadIntProperty(
+                context.PlayerCombatState, "TurnNumber");
+            var actionType = assembly.GetType(
+                "MegaCrit.Sts2.Core.GameActions.EndPlayerTurnAction",
+                throwOnError: true)!;
+            var action = Activator.CreateInstance(
+                    actionType, [context.Player, priorTurn])
+                ?? throw new InvalidOperationException(
+                    "Could not create EndPlayerTurnAction");
+            SubmitAndWait(manager, action, "end turn");
+            WaitForNextPlayPhase(context.PlayerCombatState, priorTurn);
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Unsupported step action: {requestedAction}");
+    }
+
+    private static List<object> GetCombatEnemies(Assembly assembly)
+    {
+        var combatManagerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Combat.CombatManager", throwOnError: true)!;
+        var combatManager = combatManagerType.GetProperty(
+                "Instance", BindingFlags.Public | BindingFlags.Static)
+            ?.GetValue(null)
+            ?? throw new MissingMemberException(
+                combatManagerType.FullName, "Instance");
+        var combatState = combatManagerType.GetField(
+                "_state", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(combatManager)
+            ?? throw new MissingFieldException(combatManagerType.FullName, "_state");
+        return ((IEnumerable)(combatState.GetType().GetProperty("Enemies")
+                ?.GetValue(combatState)
+            ?? throw new MissingMemberException(
+                combatState.GetType().FullName, "Enemies")))
+            .Cast<object>().ToList();
+    }
+
+    private static bool NullableUnsignedEquals(
+        object? observed,
+        ulong? requested)
+    {
+        if (observed is null)
+            return requested is null;
+        return requested.HasValue
+            && Convert.ToUInt64(observed) == requested.Value;
+    }
+
+    private static void RequireManager(object? manager)
+    {
+        if (manager is null)
+            throw new InvalidOperationException(
+                "No active episode. Send reset first.");
     }
 }
 

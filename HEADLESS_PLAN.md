@@ -61,6 +61,10 @@ reset a run and execute at least one complete combat.
   explicit information policy, all combat piles, numeric card variables,
   powers/relics/potions, enemy intent damage, checksum status, and legal
   card/target pairs without consulting scene nodes.
+- The persistent standalone stdio service now implements `health`, repeatable
+  deterministic `reset`, `observe`, validated `play_card` / `end_turn` steps,
+  and `shutdown`. A tested reset/play/end/reset sequence returns to the exact
+  initial decision state without restarting the process.
 - Earlier native callback failures reproduced in both Linux .NET and a
   self-contained Windows .NET 9 host. Resolving the real `GodotSharp.dll` is
   enough for managed type loading, but engine callbacks still require either
@@ -204,10 +208,10 @@ the game logic is drivable without Godot.
 **Goal:** expose only the states and actions required for combat reset/step and
 measure end-to-end throughput.
 
-The prerequisite observation/action vocabulary now exists. The next step is to
-extend the standalone stdio loop with reset/observe/step commands using
-`sts2.standalone.combat.v1`, then write the same episode artifact layout as the
-Godot-headless runner.
+The prerequisite observation/action vocabulary and persistent reset/step loop
+now exist. The next step is to write the same episode artifact layout as the
+Godot-headless runner, then extend the protocol to potion and player-choice
+actions.
 
 Reuse STS2MCP field names where they are useful, but do not require full
 field-for-field parity before collecting training data. Full map, event, shop,
