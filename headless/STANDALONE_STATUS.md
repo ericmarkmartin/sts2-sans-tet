@@ -73,7 +73,11 @@ HP from 80 to 76, turn advancing from 1 to 2, energy returning to 3, a new
 five-card hand, and checksums changing from `3932430620` to `1034061027`.
 
 The next gate is authoritative state and legal-action serialization following
-the models and active choice contexts, not scene nodes. Native `.mcr`
+the models and active choice contexts, not scene nodes. The first combat schema,
+`sts2.standalone.combat.v1`, now exposes an explicitly
+`omniscient_authoritative` observation with numeric card variables, all piles,
+enemy intent damage, and legal card/target pairs. The next gate is accepting
+those identities through stdio and recording pre/post observations. Native `.mcr`
 writing is not yet active because the game disables `CombatReplayWriter` in
 `TestMode`; the Godot-headless path remains the replay reference.
 
@@ -89,6 +93,8 @@ dotnet run --project headless -- phase-b-manager \
 dotnet run --project headless -- phase-c-combat \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
 dotnet run --project headless -- phase-c-action-cycle \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+dotnet run --project headless -- phase-d-observation \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
 ```
 

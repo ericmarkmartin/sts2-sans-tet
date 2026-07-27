@@ -122,8 +122,18 @@ dotnet run --project headless -- phase-c-action-cycle \
 
 It plays a legal targeted card through the real synchronized action queue,
 ends the turn, executes the enemy turn, and asserts the next player-ready
-state. The next standalone milestone is authoritative state and legal-action
-serialization. See
+state. The initial authoritative state and legal-action schema is now
+available:
+
+```bash
+dotnet run --project headless -- phase-d-observation \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+```
+
+It emits `sts2.standalone.combat.v1`; see
+[OBSERVATION_SCHEMA.md](OBSERVATION_SCHEMA.md). The next milestone is accepting
+these action identities through the stdio protocol and recording pre/post
+observations as an episode. See
 [STANDALONE_STATUS.md](STANDALONE_STATUS.md) and
 [SHARED_SERVICE_INVENTORY.md](SHARED_SERVICE_INVENTORY.md).
 

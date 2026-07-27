@@ -25,16 +25,19 @@ internal static class Program
                 "inspect" => Inspect(host, options.TypeName),
                 "phase-b-startup" => PhaseBStartup(
                     host, initializeManager: false, enterCombat: false,
-                    driveActionCycle: false),
+                    driveActionCycle: false, emitObservation: false),
                 "phase-b-manager" => PhaseBStartup(
                     host, initializeManager: true, enterCombat: false,
-                    driveActionCycle: false),
+                    driveActionCycle: false, emitObservation: false),
                 "phase-c-combat" => PhaseBStartup(
                     host, initializeManager: true, enterCombat: true,
-                    driveActionCycle: false),
+                    driveActionCycle: false, emitObservation: false),
                 "phase-c-action-cycle" => PhaseBStartup(
                     host, initializeManager: true, enterCombat: true,
-                    driveActionCycle: true),
+                    driveActionCycle: true, emitObservation: false),
+                "phase-d-observation" => PhaseBStartup(
+                    host, initializeManager: true, enterCombat: true,
+                    driveActionCycle: false, emitObservation: true),
                 "stdio" => Stdio(host),
                 _ => throw new ArgumentException($"Unknown command: {options.Command}")
             };
@@ -50,7 +53,8 @@ internal static class Program
         GameAssemblyHost host,
         bool initializeManager,
         bool enterCombat,
-        bool driveActionCycle)
+        bool driveActionCycle,
+        bool emitObservation)
     {
         var assembly = host.LoadGameAssembly();
         StandaloneRuntimePatches.Install(assembly);
@@ -130,6 +134,16 @@ internal static class Program
             EnterTestCombat(assembly, manager);
         if (driveActionCycle)
             RunScriptedActionCycle(assembly, manager);
+        if (emitObservation)
+        {
+            SetChecksumTrackingEnabled(manager, true);
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                stage = "standalone_observation",
+                observation = StandaloneObservationBuilder.Build(
+                    assembly, manager)
+            }));
+        }
         return 0;
     }
 

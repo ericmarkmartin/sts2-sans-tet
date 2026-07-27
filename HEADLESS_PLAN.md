@@ -56,6 +56,11 @@ reset a run and execute at least one complete combat.
   in player play phase. It asserts energy, hand, HP, turn, and checksum
   transitions. On the reference seed the checksums deterministically change
   from `3932430620` to `1034061027`.
+- `phase-d-observation` emits the versioned
+  `sts2.standalone.combat.v1` schema from authoritative models. It includes
+  explicit information policy, all combat piles, numeric card variables,
+  powers/relics/potions, enemy intent damage, checksum status, and legal
+  card/target pairs without consulting scene nodes.
 - Earlier native callback failures reproduced in both Linux .NET and a
   self-contained Windows .NET 9 host. Resolving the real `GodotSharp.dll` is
   enough for managed type loading, but engine callbacks still require either
@@ -198,6 +203,11 @@ the game logic is drivable without Godot.
 
 **Goal:** expose only the states and actions required for combat reset/step and
 measure end-to-end throughput.
+
+The prerequisite observation/action vocabulary now exists. The next step is to
+extend the standalone stdio loop with reset/observe/step commands using
+`sts2.standalone.combat.v1`, then write the same episode artifact layout as the
+Godot-headless runner.
 
 Reuse STS2MCP field names where they are useful, but do not require full
 field-for-field parity before collecting training data. Full map, event, shop,
