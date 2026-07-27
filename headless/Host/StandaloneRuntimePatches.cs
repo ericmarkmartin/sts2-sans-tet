@@ -44,6 +44,62 @@ internal static class StandaloneRuntimePatches
             harmonyMethodType,
             editorProbe,
             nameof(UseConsoleLoggerWithoutGodot));
+        var playCardType = gameAssembly.GetType(
+            "MegaCrit.Sts2.Core.GameActions.PlayCardAction",
+            throwOnError: true)!;
+        var playCardToString = playCardType.GetMethod(
+                nameof(ToString),
+                BindingFlags.Public | BindingFlags.Instance |
+                BindingFlags.DeclaredOnly)
+            ?? throw new MissingMethodException(
+                playCardType.FullName, nameof(ToString));
+        PatchPrefix(
+            harmony,
+            patch,
+            harmonyMethodType,
+            playCardToString,
+            nameof(UseStandalonePlayCardDescription));
+        var creatureType = gameAssembly.GetType(
+            "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
+            throwOnError: true)!;
+        var creatureLogName = creatureType.GetMethod(
+                "get_LogName",
+                BindingFlags.Public | BindingFlags.Instance)
+            ?? throw new MissingMethodException(
+                creatureType.FullName, "get_LogName");
+        PatchPrefix(
+            harmony,
+            patch,
+            harmonyMethodType,
+            creatureLogName,
+            nameof(UseStandaloneCreatureLogName));
+        var godotAssembly = Assembly.Load(new AssemblyName("GodotSharp"));
+        var timeType = godotAssembly.GetType("Godot.Time", throwOnError: true)!;
+        var ticksMsec = timeType.GetMethod(
+                "GetTicksMsec",
+                BindingFlags.Public | BindingFlags.Static)
+            ?? throw new MissingMethodException(
+                timeType.FullName, "GetTicksMsec");
+        PatchPrefix(
+            harmony,
+            patch,
+            harmonyMethodType,
+            ticksMsec,
+            nameof(UseManagedMonotonicMilliseconds));
+        var logType = gameAssembly.GetType(
+            "MegaCrit.Sts2.Core.Logging.Log", throwOnError: true)!;
+        foreach (var infoMethod in logType.GetMethods(
+                     BindingFlags.Public | BindingFlags.Static |
+                     BindingFlags.DeclaredOnly)
+                     .Where(method => method.Name == "Info"))
+        {
+            PatchPrefix(
+                harmony,
+                patch,
+                harmonyMethodType,
+                infoMethod,
+                nameof(SuppressStandaloneGameLog));
+        }
 
         // Native callback failures terminate the process rather than producing
         // managed stack traces. These prefixes provide the equivalent of a
@@ -101,8 +157,55 @@ internal static class StandaloneRuntimePatches
             harmony,
             patch,
             harmonyMethodType,
+            "MegaCrit.Sts2.Core.GameActions.Multiplayer.ActionQueueSynchronizer",
+            "RequestEnqueue",
+            "EnqueueAction");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
+            "MegaCrit.Sts2.Core.GameActions.Multiplayer.ActionQueueSet",
+            "EnqueueWithoutSynchronizing");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
             "MegaCrit.Sts2.Core.GameActions.ActionExecutor",
-            "FinishedExecutingActions");
+            "FinishedExecutingActions",
+            "ExecuteActions");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
+            "MegaCrit.Sts2.Core.GameActions.GameAction",
+            "Execute");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
+            "MegaCrit.Sts2.Core.GameActions.PlayCardAction",
+            "ExecuteAction");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
+            "MegaCrit.Sts2.Core.Models.CardModel",
+            "CanPlay",
+            "IsValidTarget",
+            "SpendResources",
+            "OnPlayWrapper");
+        TraceMethods(
+            gameAssembly,
+            harmony,
+            patch,
+            harmonyMethodType,
+            "MegaCrit.Sts2.Core.Combat.CombatState",
+            "GetCreatureAsync");
         TraceMethods(
             gameAssembly,
             harmony,
@@ -126,6 +229,7 @@ internal static class StandaloneRuntimePatches
             "MegaCrit.Sts2.Core.Commands.CardPileCmd",
             "Draw",
             "Add",
+            "AddDuringManualCardPlay",
             "ShuffleIfNecessary",
             "CheckIfDrawIsPossibleAndShowThoughtBubbleIfNot");
         TraceMethods(
@@ -170,6 +274,26 @@ internal static class StandaloneRuntimePatches
         __result = false;
         return false;
     }
+
+    public static bool UseStandalonePlayCardDescription(ref string __result)
+    {
+        __result = "PlayCardAction";
+        return false;
+    }
+
+    public static bool UseStandaloneCreatureLogName(ref string __result)
+    {
+        __result = "Creature";
+        return false;
+    }
+
+    public static bool UseManagedMonotonicMilliseconds(ref ulong __result)
+    {
+        __result = unchecked((ulong)Environment.TickCount64);
+        return false;
+    }
+
+    public static bool SuppressStandaloneGameLog() => false;
 
     public static void TraceGameBoundary(MethodBase __originalMethod)
     {

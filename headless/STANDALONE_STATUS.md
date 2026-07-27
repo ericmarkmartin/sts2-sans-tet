@@ -19,7 +19,9 @@ game process. It:
 9. initializes and launches the canonical `RunManager.Instance`; and
 10. enters a Fuzzy Wurm/Crawler combat through the normal room lifecycle,
     executes start-of-combat hooks, draws five cards, generates a checksum, and
-    reaches player play phase.
+    reaches player play phase; and
+11. submits a legal Strike and end turn through the canonical synchronized
+    action queue, executes the enemy turn, and reaches turn two.
 
 Observed cache result:
 
@@ -44,6 +46,9 @@ changes the serialized cache hash.
 | `Godot.Mathf.CeilToInt` | Managed `Math.Ceiling(Math.Log2(...))` |
 | cache `Log.Info` | Omitted; milestone emitted as JSON |
 | logger editor probe | Harmony prefix selects the console logger without calling `Godot.OS` |
+| game `Log.Info` | Suppressed; the host emits structured JSON milestones |
+| localized action/creature log descriptions | Replaced with ID-neutral descriptions |
+| `Godot.Time.GetTicksMsec` | Managed monotonic milliseconds for history timestamps |
 | `System.IO.Hashing.XxHash32` | Loaded from the game data directory and invoked exactly |
 | `SaveManager` | Uninitialized narrow graph containing default `ProgressState`; FTUE presentation disabled |
 | `INetGameService` | `DispatchProxy` no-op singleplayer service |
@@ -62,10 +67,13 @@ code resolve that singleton internally. It explicitly constructs an Ironclad
 player with the all-unlocked test state because `RunState.CreateForTest()` uses
 the deckless `Deprived` character when its player argument is omitted.
 
-The next gate is one complete logic action: expose the authoritative hand and
-targets, submit a legal card play through the normal game-action path, end the
-turn, and assert resulting HP/energy/pile/checksum transitions. State and legal
-action serialization should follow the models, not scene nodes. Native `.mcr`
+The complete logic-action gate now passes. `phase-c-action-cycle` observes a
+deterministic Strike reducing enemy HP from 56 to 50, the enemy reducing player
+HP from 80 to 76, turn advancing from 1 to 2, energy returning to 3, a new
+five-card hand, and checksums changing from `3932430620` to `1034061027`.
+
+The next gate is authoritative state and legal-action serialization following
+the models and active choice contexts, not scene nodes. Native `.mcr`
 writing is not yet active because the game disables `CombatReplayWriter` in
 `TestMode`; the Godot-headless path remains the replay reference.
 
@@ -79,6 +87,8 @@ dotnet run --project headless -- phase-b-startup \
 dotnet run --project headless -- phase-b-manager \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
 dotnet run --project headless -- phase-c-combat \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+dotnet run --project headless -- phase-c-action-cycle \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
 ```
 

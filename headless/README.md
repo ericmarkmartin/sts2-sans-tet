@@ -113,14 +113,23 @@ dotnet run --project headless -- phase-c-combat \
   --game-data-dir "<game>/data_sts2_windows_x86_64"
 ```
 
-The next standalone gate is submitting one legal card play and end-turn action,
-then asserting authoritative combat-state transitions. See
+The action-cycle gate also passes:
+
+```bash
+dotnet run --project headless -- phase-c-action-cycle \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+```
+
+It plays a legal targeted card through the real synchronized action queue,
+ends the turn, executes the enemy turn, and asserts the next player-ready
+state. The next standalone milestone is authoritative state and legal-action
+serialization. See
 [STANDALONE_STATUS.md](STANDALONE_STATUS.md) and
 [SHARED_SERVICE_INVENTORY.md](SHARED_SERVICE_INVENTORY.md).
 
 The Godot-headless path remains the end-to-end reference and replay renderer.
-The standalone path is now viable enough to pursue in parallel, but should not
-grow a protocol until a real card play and end-turn transition pass.
+The standalone path is now viable enough to pursue observation and action
+serialization in parallel with the reference backend.
 
 ## Working Godot-headless reference path
 

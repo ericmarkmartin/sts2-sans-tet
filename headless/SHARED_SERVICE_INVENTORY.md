@@ -47,10 +47,13 @@ trackers.
 | Seam | Scope | Fidelity assessment |
 | --- | --- | --- |
 | Console-logger selection | Skips `Logger.GetIsRunningFromGodotEditor()` and returns `false` | Logging backend only |
+| Structured host logging | Suppresses engine-adjacent `Log.Info` and replaces localized action/creature descriptions | Diagnostics only; JSON milestones retain observable progress |
+| Monotonic clock | Replaces `Godot.Time.GetTicksMsec()` with `Environment.TickCount64` | Preserves history ordering without engine time |
 | In-memory save graph | Supplies default progress needed during player construction | Persistence is absent; run mechanics use the resulting immutable run unlock state |
 | FTUE disabled | Sets `ProgressState.EnableFtues = false` | Tutorial overlays only |
 | No-op `INetGameService` | Reports connected singleplayer and completes transport tasks immediately | Appropriate for singleplayer; multiplayer is out of scope |
 | Test/noninteractive mode | Uses the game's own branches to skip scene nodes, audio timing, and visual waits | Mechanics and hooks still execute |
+| Checksum opt-in | Re-enables `ChecksumTracker.IsEnabled` for the action-cycle probe after `TestMode` disables it | Restores canonical full-state checksums |
 | Managed model-cache math | Replaces three `Godot.Mathf` calls with equivalent managed math | Cache counts and hash match the rendered game exactly |
 
 ## Observation contract

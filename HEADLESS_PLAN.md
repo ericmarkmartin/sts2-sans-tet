@@ -50,6 +50,12 @@ reset a run and execute at least one complete combat.
   normal profile setting. This prevents tutorial nodes from being requested;
   it does not alter mechanics. `TestMode` supplies the game's intended
   noninteractive timing and visual-suppression behavior.
+- `phase-c-action-cycle` now submits a targeted Strike through
+  `ActionQueueSynchronizer.RequestEnqueue`, awaits the canonical action,
+  submits `EndPlayerTurnAction`, executes the enemy turn, and reaches turn two
+  in player play phase. It asserts energy, hand, HP, turn, and checksum
+  transitions. On the reference seed the checksums deterministically change
+  from `3932430620` to `1034061027`.
 - Earlier native callback failures reproduced in both Linux .NET and a
   self-contained Windows .NET 9 host. Resolving the real `GodotSharp.dll` is
   enough for managed type loading, but engine callbacks still require either
@@ -173,17 +179,20 @@ observed call paths and keep the compatibility inventory current.
 resource-loading, or generated Godot binding behavior, reassess the standalone
 approach rather than recreating Godot piecemeal.
 
-### Phase B2 — Drive one combat turn  (in progress)
+### Phase B2 — Drive one combat turn  (passed)
 
 **Goal:** start a run, enter combat, play a card, end turn, observe result — all in-process, no JSON yet.
 
 **Steps:**
-1. Use the passing `phase-c-combat` startup through player play phase.
-2. Serialize the authoritative combat state and enumerate legal actions.
-3. Locate `CombatManager`, read the player's hand, call `PlayCard(...)` on a card, call `EndTurn()`.
-4. Verify HP/enemy state changed as expected.
+1. `phase-c-action-cycle` selects a legal enemy-targeting card from the
+   authoritative hand.
+2. It submits `PlayCardAction` and `EndPlayerTurnAction` through the real
+   synchronizer and action executor.
+3. It waits for the next stable player play phase and verifies HP, energy,
+   piles, turn number, and checksums.
 
-**Deliverable:** an integration test in `headless/` that runs a scripted combat and asserts state transitions. Proves the game logic is drivable without Godot.
+**Deliverable:** `phase-c-action-cycle` is the integration smoke test proving
+the game logic is drivable without Godot.
 
 ### Phase C — Minimal training protocol  (after a combat works)
 

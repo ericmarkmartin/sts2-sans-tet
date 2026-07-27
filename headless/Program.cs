@@ -24,11 +24,17 @@ internal static class Program
                 "probe" => Probe(host),
                 "inspect" => Inspect(host, options.TypeName),
                 "phase-b-startup" => PhaseBStartup(
-                    host, initializeManager: false, enterCombat: false),
+                    host, initializeManager: false, enterCombat: false,
+                    driveActionCycle: false),
                 "phase-b-manager" => PhaseBStartup(
-                    host, initializeManager: true, enterCombat: false),
+                    host, initializeManager: true, enterCombat: false,
+                    driveActionCycle: false),
                 "phase-c-combat" => PhaseBStartup(
-                    host, initializeManager: true, enterCombat: true),
+                    host, initializeManager: true, enterCombat: true,
+                    driveActionCycle: false),
+                "phase-c-action-cycle" => PhaseBStartup(
+                    host, initializeManager: true, enterCombat: true,
+                    driveActionCycle: true),
                 "stdio" => Stdio(host),
                 _ => throw new ArgumentException($"Unknown command: {options.Command}")
             };
@@ -43,7 +49,8 @@ internal static class Program
     private static int PhaseBStartup(
         GameAssemblyHost host,
         bool initializeManager,
-        bool enterCombat)
+        bool enterCombat,
+        bool driveActionCycle)
     {
         var assembly = host.LoadGameAssembly();
         StandaloneRuntimePatches.Install(assembly);
@@ -121,6 +128,8 @@ internal static class Program
         }));
         if (enterCombat)
             EnterTestCombat(assembly, manager);
+        if (driveActionCycle)
+            RunScriptedActionCycle(assembly, manager);
         return 0;
     }
 
@@ -278,6 +287,263 @@ internal static class Program
             throw new InvalidOperationException("Expected an enumerable game value");
         return enumerable.Cast<object>().Count();
     }
+
+    private static void RunScriptedActionCycle(Assembly assembly, object manager)
+    {
+        var context = GetCombatContext(assembly);
+        var before = ReadCombatSnapshot(context.Player, context.Enemy);
+        SetChecksumTrackingEnabled(manager, true);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_action_cycle_started"
+        }));
+        var checksumBefore = GenerateChecksum(manager, "Standalone before card play");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_pre_action_checksum",
+            checksum = checksumBefore
+        }));
+
+        var hand = GetPileCards(context.PlayerCombatState, "Hand");
+        var canPlayTargeting = hand[0].GetType().GetMethod(
+                "CanPlayTargeting",
+                BindingFlags.Public | BindingFlags.Instance)
+            ?? throw new MissingMethodException(
+                hand[0].GetType().FullName, "CanPlayTargeting");
+        var card = hand.FirstOrDefault(candidate =>
+                canPlayTargeting.Invoke(candidate, [context.Enemy]) is true)
+            ?? throw new InvalidOperationException(
+                "Opening hand contained no playable enemy-targeting card");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_card_selected",
+            card = GetModelIdEntry(card)
+        }));
+
+        var playCardType = assembly.GetType(
+            "MegaCrit.Sts2.Core.GameActions.PlayCardAction",
+            throwOnError: true)!;
+        var playAction = Activator.CreateInstance(
+                playCardType, [card, context.Enemy])
+            ?? throw new InvalidOperationException("Could not create PlayCardAction");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_play_action_created"
+        }));
+        SubmitAndWait(manager, playAction, "card play");
+        var afterPlay = ReadCombatSnapshot(context.Player, context.Enemy);
+        if (afterPlay.Energy >= before.Energy
+            || afterPlay.HandCount >= before.HandCount
+            || afterPlay.EnemyHp >= before.EnemyHp)
+        {
+            throw new InvalidOperationException(
+                "Card play did not consume energy/card and damage the enemy");
+        }
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_card_play_complete",
+            card = GetModelIdEntry(card),
+            energy_before = before.Energy,
+            energy_after = afterPlay.Energy,
+            hand_before = before.HandCount,
+            hand_after = afterPlay.HandCount,
+            enemy_hp_before = before.EnemyHp,
+            enemy_hp_after = afterPlay.EnemyHp
+        }));
+
+        var endTurnType = assembly.GetType(
+            "MegaCrit.Sts2.Core.GameActions.EndPlayerTurnAction",
+            throwOnError: true)!;
+        var endTurnAction = Activator.CreateInstance(
+                endTurnType, [context.Player, afterPlay.TurnNumber])
+            ?? throw new InvalidOperationException(
+                "Could not create EndPlayerTurnAction");
+        SubmitAndWait(manager, endTurnAction, "end turn");
+        WaitForNextPlayPhase(context.PlayerCombatState, afterPlay.TurnNumber);
+
+        var afterTurn = ReadCombatSnapshot(context.Player, context.Enemy);
+        var checksumAfter = GenerateChecksum(manager, "Standalone after turn cycle");
+        if (afterTurn.Phase != "Play"
+            || afterTurn.TurnNumber <= afterPlay.TurnNumber
+            || afterTurn.HandCount == 0
+            || checksumAfter == checksumBefore)
+        {
+            throw new InvalidOperationException(
+                "End turn did not reach a changed, player-ready combat state");
+        }
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            stage = "scripted_action_cycle_complete",
+            phase = afterTurn.Phase,
+            turn_before = afterPlay.TurnNumber,
+            turn_after = afterTurn.TurnNumber,
+            player_hp_before = before.PlayerHp,
+            player_hp_after = afterTurn.PlayerHp,
+            enemy_hp_after = afterTurn.EnemyHp,
+            hand_count = afterTurn.HandCount,
+            energy = afterTurn.Energy,
+            checksum_before = checksumBefore,
+            checksum_after = checksumAfter
+        }));
+    }
+
+    private static (
+        object Player,
+        object PlayerCombatState,
+        object Enemy) GetCombatContext(Assembly assembly)
+    {
+        var combatManagerType = assembly.GetType(
+            "MegaCrit.Sts2.Core.Combat.CombatManager", throwOnError: true)!;
+        var combatManager = combatManagerType.GetProperty(
+                "Instance", BindingFlags.Public | BindingFlags.Static)
+            ?.GetValue(null)
+            ?? throw new MissingMemberException(
+                combatManagerType.FullName, "Instance");
+        var combatState = combatManagerType.GetField(
+                "_state", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(combatManager)
+            ?? throw new MissingFieldException(combatManagerType.FullName, "_state");
+        var player = ((IEnumerable)(combatState.GetType().GetProperty("Players")
+                ?.GetValue(combatState)
+            ?? throw new MissingMemberException(
+                combatState.GetType().FullName, "Players")))
+            .Cast<object>().Single();
+        var playerCombatState = player.GetType().GetProperty("PlayerCombatState")
+            ?.GetValue(player)
+            ?? throw new MissingMemberException(
+                player.GetType().FullName, "PlayerCombatState");
+        var enemy = ((IEnumerable)(combatState.GetType().GetProperty("Enemies")
+                ?.GetValue(combatState)
+            ?? throw new MissingMemberException(
+                combatState.GetType().FullName, "Enemies")))
+            .Cast<object>().Single();
+        return (player, playerCombatState, enemy);
+    }
+
+    private static List<object> GetPileCards(
+        object playerCombatState,
+        string pileName)
+    {
+        var pile = playerCombatState.GetType().GetProperty(pileName)
+            ?.GetValue(playerCombatState)
+            ?? throw new MissingMemberException(
+                playerCombatState.GetType().FullName, pileName);
+        return ((IEnumerable)(pile.GetType().GetProperty("Cards")?.GetValue(pile)
+                ?? throw new MissingMemberException(
+                    pile.GetType().FullName, "Cards")))
+            .Cast<object>().ToList();
+    }
+
+    private static CombatSnapshot ReadCombatSnapshot(object player, object enemy)
+    {
+        var playerCombatState = player.GetType().GetProperty("PlayerCombatState")
+            ?.GetValue(player)
+            ?? throw new MissingMemberException(
+                player.GetType().FullName, "PlayerCombatState");
+        var playerCreature = player.GetType().GetProperty("Creature")
+            ?.GetValue(player)
+            ?? throw new MissingMemberException(player.GetType().FullName, "Creature");
+        return new CombatSnapshot(
+            Phase: playerCombatState.GetType().GetProperty("Phase")
+                ?.GetValue(playerCombatState)?.ToString()
+                ?? "Unknown",
+            TurnNumber: Convert.ToInt32(
+                playerCombatState.GetType().GetProperty("TurnNumber")
+                    ?.GetValue(playerCombatState)),
+            Energy: Convert.ToInt32(
+                playerCombatState.GetType().GetProperty("Energy")
+                    ?.GetValue(playerCombatState)),
+            HandCount: GetPileCards(playerCombatState, "Hand").Count,
+            PlayerHp: ReadIntProperty(playerCreature, "CurrentHp"),
+            EnemyHp: ReadIntProperty(enemy, "CurrentHp"));
+    }
+
+    private static int ReadIntProperty(object value, string propertyName) =>
+        Convert.ToInt32(value.GetType().GetProperty(propertyName)
+            ?.GetValue(value));
+
+    private static string GetModelIdEntry(object model)
+    {
+        var id = model.GetType().GetProperty("Id")?.GetValue(model)
+            ?? throw new MissingMemberException(model.GetType().FullName, "Id");
+        return id.GetType().GetProperty("Entry")?.GetValue(id)?.ToString()
+            ?? id.ToString() ?? "unknown";
+    }
+
+    private static void SubmitAndWait(
+        object manager,
+        object action,
+        string description)
+    {
+        var synchronizer = manager.GetType().GetProperty("ActionQueueSynchronizer")
+            ?.GetValue(manager)
+            ?? throw new MissingMemberException(
+                manager.GetType().FullName, "ActionQueueSynchronizer");
+        synchronizer.GetType().GetMethod("RequestEnqueue")
+            ?.Invoke(synchronizer, [action]);
+        var completion = action.GetType().GetProperty("CompletionTask")
+            ?.GetValue(action) as Task
+            ?? throw new MissingMemberException(
+                action.GetType().FullName, "CompletionTask");
+        if (!completion.Wait(TimeSpan.FromSeconds(10)))
+            throw new TimeoutException($"{description} exceeded 10 seconds");
+        completion.GetAwaiter().GetResult();
+    }
+
+    private static void WaitForNextPlayPhase(
+        object playerCombatState,
+        int priorTurn)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var phase = playerCombatState.GetType().GetProperty("Phase")
+                ?.GetValue(playerCombatState)?.ToString();
+            var turn = Convert.ToInt32(
+                playerCombatState.GetType().GetProperty("TurnNumber")
+                    ?.GetValue(playerCombatState));
+            if (phase == "Play" && turn > priorTurn)
+                return;
+            Thread.Sleep(1);
+        }
+        throw new TimeoutException(
+            "Combat did not reach the next player play phase in 10 seconds");
+    }
+
+    private static uint GenerateChecksum(object manager, string reason)
+    {
+        var tracker = manager.GetType().GetProperty("ChecksumTracker")
+            ?.GetValue(manager)
+            ?? throw new MissingMemberException(
+                manager.GetType().FullName, "ChecksumTracker");
+        var generate = tracker.GetType().GetMethods()
+            .Single(method =>
+                method.Name == "GenerateChecksum"
+                && method.GetParameters().Length == 2);
+        var data = generate.Invoke(tracker, [reason, null])
+            ?? throw new InvalidOperationException(
+                "GenerateChecksum returned null");
+        return Convert.ToUInt32(data.GetType().GetField("checksum")
+            ?.GetValue(data));
+    }
+
+    private static void SetChecksumTrackingEnabled(object manager, bool enabled)
+    {
+        var tracker = manager.GetType().GetProperty("ChecksumTracker")
+            ?.GetValue(manager)
+            ?? throw new MissingMemberException(
+                manager.GetType().FullName, "ChecksumTracker");
+        tracker.GetType().GetProperty("IsEnabled")
+            ?.SetValue(tracker, enabled);
+    }
+
+    private sealed record CombatSnapshot(
+        string Phase,
+        int TurnNumber,
+        int Energy,
+        int HandCount,
+        int PlayerHp,
+        int EnemyHp);
 
     private static object CreateStandaloneNetService(Assembly assembly)
     {
