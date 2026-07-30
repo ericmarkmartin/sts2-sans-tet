@@ -10,7 +10,11 @@ from unittest.mock import patch
 
 import headless.sts2_cli_episode as episode_module
 from headless.compare_episodes import compare_episodes
-from headless.sts2_cli_episode import choose_sts2_cli_action, run_episode
+from headless.sts2_cli_episode import (
+    choose_sts2_cli_action,
+    load_progress_snapshot,
+    run_episode,
+)
 
 
 class Sts2CliPolicyTests(unittest.TestCase):
@@ -75,6 +79,35 @@ class Sts2CliPolicyTests(unittest.TestCase):
 
 
 class Sts2CliEpisodeTests(unittest.TestCase):
+    def test_extracts_progress_snapshot(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "progress.save"
+        path.write_text(
+            json.dumps(
+                {
+                    "epochs": [
+                        {"id": "B_EPOCH", "state": "not_obtained"},
+                        {"id": "A_EPOCH", "state": "revealed"},
+                    ],
+                    "encounter_stats": [
+                        {"encounter_id": "ENCOUNTER.SLIMES_WEAK"}
+                    ],
+                    "character_stats": [
+                        {"total_wins": 2, "total_losses": 3}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        snapshot = load_progress_snapshot(path)
+        self.assertEqual(snapshot["unlocked_epoch_ids"], ["A_EPOCH"])
+        self.assertEqual(
+            snapshot["encounter_ids_seen"], ["ENCOUNTER.SLIMES_WEAK"]
+        )
+        self.assertEqual(snapshot["number_of_runs"], 5)
+        self.assertEqual(len(snapshot["sha256"]), 64)
+
     def test_records_and_validates_terminal_episode(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -113,6 +146,7 @@ class Sts2CliEpisodeTests(unittest.TestCase):
             cli_dll=dll,
             cli_lib=None,
             game_data_dir=None,
+            progress_save=None,
             dotnet="dotnet",
             character="Ironclad",
             ascension=0,

@@ -13,6 +13,7 @@ inside --cli-dir, then runs the episode.
 Options:
   --cli-dir PATH          sts2-cli checkout containing lib/ and build output
   --game-data-dir PATH    installed game data directory for dependencies
+  --progress-save PATH    Godot progress.save used for unlock/RNG provenance
   --setup                 set up and build the pinned sts2-cli checkout first
   --seed VALUE            game seed (default: HEADLESSBENCH)
   --policy-seed N         baseline-policy seed (default: 0)
@@ -31,7 +32,8 @@ EOF
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cli_dir=""
 game_data_dir=""
-expected_revision="f4c83d00d26aaa9fb129ae32c9f7ae3c7c143785"
+progress_save=""
+expected_revision="5e3e161a477c826c1010867ec81780dced29f07f"
 expected_original_sts2="a1f9e653f1e28e4076558fee1e60d218619cb7e057b887c6417f62c62c6d7a52"
 expected_runtime_sts2="7eced881ca7b7a4d4282fa40ff7cf27cc9a4466c4b759c2a2356a4743928fcbe"
 setup=0
@@ -51,6 +53,7 @@ while (($#)); do
   case "$1" in
     --cli-dir) cli_dir="${2:?missing path}"; shift 2 ;;
     --game-data-dir) game_data_dir="${2:?missing path}"; shift 2 ;;
+    --progress-save) progress_save="${2:?missing path}"; shift 2 ;;
     --setup) setup=1; shift ;;
     --seed) seed="${2:?missing seed}"; shift 2 ;;
     --policy-seed) policy_seed="${2:?missing policy seed}"; shift 2 ;;
@@ -109,6 +112,13 @@ if ((setup)) && [[ -z "$game_data_dir" ]]; then
   printf '%s\n' '--setup requires --game-data-dir' >&2
   exit 2
 fi
+if [[ -n "$progress_save" ]]; then
+  progress_save="$(realpath "$progress_save")"
+  if [[ ! -f "$progress_save" ]]; then
+    printf 'progress save does not exist: %s\n' "$progress_save" >&2
+    exit 2
+  fi
+fi
 if [[ ! "$policy_seed" =~ ^[0-9]+$ || ! "$ascension" =~ ^[0-9]+$ || ! "$max_actions" =~ ^[1-9][0-9]*$ ]]; then
   printf '%s\n' 'policy seed and ascension must be nonnegative integers; max actions must be positive' >&2
   exit 2
@@ -153,6 +163,9 @@ command=(
 )
 if [[ -n "$game_data_dir" ]]; then
   command+=(--game-data-dir "$game_data_dir")
+fi
+if [[ -n "$progress_save" ]]; then
+  command+=(--progress-save "$progress_save")
 fi
 
 if ((dry_run)); then

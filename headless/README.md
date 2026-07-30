@@ -48,15 +48,25 @@ layout used by the Godot-headless runner:
 
 ```bash
 ./headless/run_sts2_cli_episode.sh --cli-dir ../sts2-cli \
-  --game-data-dir "<game>/data_sts2_windows_x86_64"
+  --game-data-dir "<game>/data_sts2_windows_x86_64" \
+  --progress-save "<active-modded-profile>/saves/progress.save"
 ```
 
 See [STS2_CLI_BACKEND.md](STS2_CLI_BACKEND.md) for the pinned revision,
 fresh-session setup, information-policy distinction, provenance fields, and
-current replay limitations. This external backend is now the practical
-full-run standalone baseline. The smaller host implemented in this directory
-remains useful for testing minimal service initialization and for measuring
-how much of that implementation can eventually be brought in-tree.
+current replay limitations. Replay the resulting episode through Godot with:
+
+```bash
+./headless/run_episode.sh \
+  --replay-episode headless/episodes/episode-NNNN \
+  --progress-save "<active-modded-profile>/saves/progress.save"
+```
+
+This external backend is now the practical full-run standalone baseline. A
+124-action episode has matched Godot end-to-end; see
+[CROSS_BACKEND_PARITY.md](CROSS_BACKEND_PARITY.md). The smaller host
+implemented in this directory remains useful for testing minimal service
+initialization and for measuring how much can eventually be brought in-tree.
 
 ## Phase A findings
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -200,6 +201,52 @@ def _find_cli_root(dll: Path) -> Path | None:
     return None
 
 
+def load_progress_snapshot(path: Path) -> dict[str, Any]:
+    """Extract the immutable unlock inputs used while generating a run."""
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("progress save must contain a JSON object")
+
+    epochs = value.get("epochs")
+    encounters = value.get("encounter_stats")
+    character_stats = value.get("character_stats")
+    if not isinstance(epochs, list):
+        raise ValueError("progress save is missing epochs")
+    if not isinstance(encounters, list):
+        raise ValueError("progress save is missing encounter_stats")
+    if not isinstance(character_stats, list):
+        raise ValueError("progress save is missing character_stats")
+
+    unlocked_epoch_ids = sorted(
+        epoch["id"]
+        for epoch in epochs
+        if isinstance(epoch, dict)
+        and str(epoch.get("state", "")).lower() == "revealed"
+        and isinstance(epoch.get("id"), str)
+    )
+    encounter_ids_seen = sorted(
+        encounter["encounter_id"]
+        for encounter in encounters
+        if isinstance(encounter, dict)
+        and isinstance(encounter.get("encounter_id"), str)
+    )
+    number_of_runs = sum(
+        int(stats.get("total_wins", 0)) + int(stats.get("total_losses", 0))
+        for stats in character_stats
+        if isinstance(stats, dict)
+    )
+    snapshot = {
+        "unlocked_epoch_ids": unlocked_epoch_ids,
+        "encounter_ids_seen": encounter_ids_seen,
+        "number_of_runs": number_of_runs,
+    }
+    canonical = json.dumps(
+        snapshot, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    snapshot["sha256"] = hashlib.sha256(canonical).hexdigest()
+    return snapshot
+
+
 def run_episode(args: argparse.Namespace) -> Path:
     dll = args.cli_dll.resolve()
     if not dll.is_file():
@@ -208,6 +255,12 @@ def run_episode(args: argparse.Namespace) -> Path:
     cli_lib = args.cli_lib.resolve() if args.cli_lib else None
     if cli_lib is None and cli_root is not None and (cli_root / "lib").is_dir():
         cli_lib = cli_root / "lib"
+    progress_save = getattr(args, "progress_save", None)
+    progress_snapshot = (
+        load_progress_snapshot(progress_save.resolve())
+        if progress_save is not None
+        else None
+    )
 
     episode_dir = allocate_episode_dir(args.episodes_dir, args.episode_dir)
     game_log_path = episode_dir / "game.log"
@@ -234,16 +287,27 @@ def run_episode(args: argparse.Namespace) -> Path:
                 game_data_dir=args.game_data_dir,
             )
             ready = client.ready
-            state = client.send(
-                {
-                    "cmd": "start_run",
-                    "character": args.character,
-                    "ascension": args.ascension,
-                    "seed": args.seed,
-                    "lang": args.lang,
-                    "observation_mode": args.observation_mode,
-                }
-            )
+            start_command = {
+                "cmd": "start_run",
+                "character": args.character,
+                "ascension": args.ascension,
+                "seed": args.seed,
+                "lang": args.lang,
+                "observation_mode": args.observation_mode,
+            }
+            if progress_snapshot is not None:
+                start_command.update(
+                    {
+                        "unlocked_epoch_ids": progress_snapshot[
+                            "unlocked_epoch_ids"
+                        ],
+                        "encounter_ids_seen": progress_snapshot[
+                            "encounter_ids_seen"
+                        ],
+                        "number_of_runs": progress_snapshot["number_of_runs"],
+                    }
+                )
+            state = client.send(start_command)
             if state.get("type") == "error":
                 raise RuntimeError(state.get("message", "start_run failed"))
             (episode_dir / "initial.state").write_text(
@@ -336,6 +400,15 @@ def run_episode(args: argparse.Namespace) -> Path:
             "schema": "sts2-cli.observation.v1",
             "mode": args.observation_mode,
         },
+        "profile": (
+            {
+                "mode": "progress_snapshot",
+                **progress_snapshot,
+                "source_sha256": sha256_file(progress_save.resolve()),
+            }
+            if progress_snapshot is not None
+            else {"mode": "all_unlocks"}
+        ),
         "launch": {
             "dotnet": args.dotnet,
             "dll": str(dll),
@@ -405,6 +478,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="sts2-cli lib directory; auto-detected from a source checkout",
     )
     parser.add_argument("--game-data-dir", type=Path)
+    parser.add_argument(
+        "--progress-save",
+        type=Path,
+        help=(
+            "Godot progress.save whose unlock snapshot should seed room "
+            "generation"
+        ),
+    )
     parser.add_argument("--dotnet", default="dotnet")
     parser.add_argument("--character", default="Ironclad")
     parser.add_argument("--ascension", type=int, default=0)

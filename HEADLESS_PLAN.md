@@ -7,23 +7,24 @@ under Godot `--headless --bootstrap` as the working reference backend; retain
 standalone .NET as a conditional optimization if profiling justifies its much
 higher implementation risk.
 
-This is now a two-track investigation:
+This is now a two-backend system:
 
 - **Near-term training baseline:** run the real game with Godot's `--headless`
-  display driver and measure its cost and throughput.
-- **Long-term standalone backend:** continue only if the headless-Godot baseline
-  is too expensive and the measured Godot stubbing surface looks tractable.
+  display driver as the rendering and semantic reference.
+- **High-throughput simulation baseline:** run the real managed game logic
+  through the pinned `sts2-cli` fork, then replay episode action traces in
+  Godot for parity and video.
 
-Do not build protocol or Gym plumbing around a backend until that backend can
-reset a run and execute at least one complete combat.
+Both backends now execute full episodes. Keep cross-backend replay parity as a
+release gate for standalone changes.
 
 ## Current status (2026-07-30)
 
 - A compatibility branch of `wuhao21/sts2-cli` is now pinned at
-  `ericmarkmartin/sts2-cli@f4c83d0`. It builds against the installed current
-  game, completes full standalone episodes, and passes 60 tests. Its Neow and
-  other suspended-choice interactions now resume the original engine task
-  rather than re-entering the choice.
+  `ericmarkmartin/sts2-cli@5e3e161`. It builds against the installed current
+  game, completes full standalone episodes, and uses the standard
+  `RunState.CreateForNewRun` mechanics initialization while retaining
+  `SetUpTest` only for presentation/persistence suppression.
 - The fork exposes versioned `sts2-cli.observation.v1` decisions. Human mode
   includes visible pile membership without leaking private draw order;
   authoritative mode additionally exposes engine pile order. Canonical
@@ -31,14 +32,24 @@ reset a run and execute at least one complete combat.
 - `headless/sts2_cli_episode.py` adapts that protocol to this repository's
   `initial.state` / `actions.jsonl` / `results.jsonl` / `manifest.json`
   contract. `headless/run_sts2_cli_episode.sh` is the stable, reusable command
-  boundary.
-- Three full standalone smoke tests reached a legitimate terminal floor-6
-  loss in 109 actions. Repeated runs with the same game and policy seeds had
-  byte-equivalent initial states, action payloads, and all 109 result states.
-  The offline validator accepted each episode.
-- The standalone fork currently produces no `.mcr`. Godot headless remains the
-  rendered reference and combat-video backend until action-trace replay parity
-  is implemented and checksum-validated.
+  boundary. `--progress-save` captures the run-shaping unlock snapshot
+  (revealed epochs, seen encounters, and run count) and fingerprints it in the
+  manifest; seed alone is not sufficient provenance because room generation
+  consumes RNG according to unlocked content.
+- `headless/replay_trace_godot.py` semantically translates a standalone episode
+  into Godot actions, labels presentation-only actions as automatic, and
+  compares normalized checkpoints after every source action.
+- Episode `0012` passed full cross-backend replay: all 124 source actions,
+  140 Godot actions (16 automatic), four combats, rewards/card selections,
+  an event, map movement, a Fishing Rod upgrade, and terminal floor-8 loss
+  matched with no semantic divergence. See
+  `headless/CROSS_BACKEND_PARITY.md`.
+- Profile-backed episodes `0012` and `0013` were exact deterministic repeats:
+  identical initial state, all 124 actions, all 124 result states, and terminal
+  summary after timing fields were excluded.
+- The standalone fork still produces no `.mcr`. Godot remains the rendering
+  backend; the now-validated episode trace can reconstruct the whole run, while
+  archived `.mcr` remains the highest-fidelity combat artifact when available.
 
 - Phase A passed: `sts2.dll` loads in .NET 9, all types required by the probe
   resolve, and `MegaCrit.Sts2.Core.Runs.RunManager` constructs successfully.
@@ -224,29 +235,26 @@ approach rather than recreating Godot piecemeal.
 **Deliverable:** `phase-c-action-cycle` is the integration smoke test proving
 the game logic is drivable without Godot.
 
-### Phase C — Minimal training protocol  (after a combat works)
+### Phase C — Full training protocol  (passing)
 
-**Goal:** expose only the states and actions required for combat reset/step and
-measure end-to-end throughput.
+**Goal:** expose complete run decisions with an explicit information policy,
+record portable episodes, and continuously compare them with Godot.
 
-The prerequisite observation/action vocabulary and persistent reset/step loop
-now exist. The next step is to write the same episode artifact layout as the
-Godot-headless runner, then extend the protocol to potion and player-choice
-actions.
-
-Reuse STS2MCP field names where they are useful, but do not require full
-field-for-field parity before collecting training data. Full map, event, shop,
-reward, and game-over parity becomes a later expansion milestone.
+The standalone backend now covers map, event, combat, reward, rest-site, shop,
+and terminal decisions. Its episode adapter and Godot semantic replay have
+passed one complete 124-action run.
 
 **Steps:**
 1. Define versioned `reset`, `get_state`, `play_card`, and `end_turn` messages.
 2. Include explicit valid-action data and stable entity/card identifiers; do
    not make Python infer legality from presentation fields.
 3. Run a seeded scripted combat twice and assert deterministic observations.
-4. Add non-combat state families incrementally, with captured fixtures from
-   STS2MCP where semantic parity matters.
+4. Gate standalone changes on representative cross-backend episode replay.
+5. Add direct potion-use coverage and broaden seeds, characters, events,
+   shops, rest sites, elites, bosses, and act transitions.
 
-**Deliverable:** a versioned combat protocol with deterministic fixture tests.
+**Deliverable:** a versioned full-run protocol with deterministic fixture tests
+and a semantic Godot replay oracle.
 
 ### Phase C1 — Replay and provenance artifacts
 

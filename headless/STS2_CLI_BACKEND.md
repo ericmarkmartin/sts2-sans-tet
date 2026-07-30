@@ -3,7 +3,7 @@
 This is the shortest path from a fresh Codex session to a recorded full run
 without launching Godot or Steam. It uses our compatibility branch of
 [`ericmarkmartin/sts2-cli`](https://github.com/ericmarkmartin/sts2-cli),
-pinned here to commit `f4c83d0`.
+pinned here to commit `5e3e161`.
 
 The output uses the same episode contract as the Godot-headless runner:
 
@@ -17,8 +17,8 @@ episode-NNNN/
 ```
 
 The standalone backend does not currently produce `.mcr` combat replays.
-Rendering therefore remains a separate parity/replay project; see
-[Limitations](#limitations).
+Its episode actions can now be replayed and checked end-to-end in Godot; see
+[CROSS_BACKEND_PARITY.md](CROSS_BACKEND_PARITY.md).
 
 ## Fresh-session procedure
 
@@ -31,13 +31,15 @@ outputs inside the fork. It does not modify the installed game.
 git clone --branch codex/current-sts2-compat \
   https://github.com/ericmarkmartin/sts2-cli.git
 cd sts2-cli
-git checkout f4c83d0
+git checkout 5e3e161
 
 game_data="/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64"
+progress_save="/mnt/c/Users/<windows-user>/AppData/Roaming/SlayTheSpire2/steam/<steam-id>/modded/profile1/saves/progress.save"
 cd ../sts2-sans-tet
 ./headless/run_sts2_cli_episode.sh \
   --cli-dir ../sts2-cli \
   --game-data-dir "$game_data" \
+  --progress-save "$progress_save" \
   --setup \
   --seed HEADLESSBENCH \
   --policy-seed 0 \
@@ -46,6 +48,13 @@ cd ../sts2-sans-tet
 
 `--setup` is only needed after a fresh clone or game-version change. Later
 episodes use the same command without it.
+
+`--progress-save` is required when the episode will be compared with a Godot
+run using that profile. The wrapper extracts only the immutable run-generation
+inputs: revealed epoch IDs, seen encounter IDs, and completed-run count. Those
+values and their canonical SHA-256 are stored in the episode manifest. Without
+this option the backend deliberately uses `UnlockState.all`, which is
+deterministic but may generate different room queues from an active profile.
 
 For permission-managed Codex sessions, review this script and permanently
 approve only the stable prefix:
@@ -84,20 +93,37 @@ Every decision carries schema `sts2-cli.observation.v1` and a canonical
 SHA-256 observation checksum.
 
 The runner records the fork revision, protocol version, standalone DLL hash,
-original game DLL hash, patched runtime DLL hash, observation policy, seed,
-actions, results, terminal outcome, and binary episode grade in
-`manifest.json`.
+original game DLL hash, patched runtime DLL hash, observation policy, profile
+snapshot/fingerprint, seed, actions, results, terminal outcome, and binary
+episode grade in `manifest.json`.
+
+Replay and compare the complete episode in Godot:
+
+```bash
+./headless/run_episode.sh \
+  --replay-episode headless/episodes/episode-NNNN \
+  --progress-save "$progress_save"
+```
+
+This exits zero only after consuming every source action and matching the
+terminal state. Inspect the reported `headless/parity-runs/parity-NNNN/`
+directory for translated actions, states, Godot log, and detailed checkpoints.
 
 ## Copy-paste prompt for a fresh Codex session
 
 ```text
 Read headless/STS2_CLI_BACKEND.md completely. Verify that the sts2-cli checkout
-is exactly commit f4c83d0 (or report why a newer pinned commit is required).
+is exactly commit 5e3e161 (or report why a newer pinned commit is required).
+Locate the active modded profile's saves/progress.save and pass it with
+--progress-save so room-generation provenance matches Godot.
 Run one full Ironclad episode in human observation mode with seed
 HEADLESSBENCH, preserve the allocated episode directory, validate it with
-the wrapper's --validate-only mode, and report the terminal grade, act/floor,
-action count, elapsed time, and every recorded version/hash. Do not modify the
-installed Steam game. Do not claim that an MP4 or MCR exists unless you
+the wrapper's --validate-only mode, then replay it through Godot with
+./headless/run_episode.sh --replay-episode and the same --progress-save.
+Require a complete parity match and
+report the terminal grade, act/floor, action counts, elapsed time, profile
+fingerprint, every recorded version/hash, and parity report path. Do not modify
+the installed Steam game. Do not claim that an MP4 or MCR exists unless you
 actually produced and validated it.
 ```
 
@@ -111,14 +137,13 @@ actually produced and validated it.
 - The backend patches a private copy of `sts2.dll` to remove two asynchronous
   waits and uses managed Godot stubs. Provenance must therefore pin both the
   original and patched DLL hashes.
-- The fork has broad run coverage and a passing test suite, but it is not yet
-  proven behaviorally identical to the rendered game across every card, event,
-  relic, and act transition.
+- One 124-action, four-combat full run has matched Godot end-to-end. This is a
+  strong integration proof, not exhaustive coverage across every card, event,
+  relic, character, and act transition.
 - The built-in `CombatReplayWriter` is not currently active on this standalone
-  path. An episode JSONL trace can drive a future rendered replay adapter, but
-  it is not itself an `.mcr` and cannot yet be passed directly to the game's
-  replay player.
-- Post-hoc video requires either deterministic action replay in a pinned
-  rendered build or a purpose-built trace renderer. Cross-backend observation
-  checksum comparison should be the acceptance gate before treating that
-  video as a faithful replay.
+  path. The episode JSONL trace now drives the Godot semantic replay adapter,
+  but it is not itself an `.mcr` and cannot be passed directly to the game's
+  native replay player.
+- Post-hoc whole-episode MP4 capture still needs a rendered launch/capture mode
+  around the validated action replay. Do not confuse semantic parity with an
+  already-produced video artifact.

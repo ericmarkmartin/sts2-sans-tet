@@ -19,6 +19,7 @@ __pycache__/
 headless/episode-trace.jsonl
 headless/replays/
 headless/episodes/
+headless/parity-runs/
 
 # IDE
 .vs/
