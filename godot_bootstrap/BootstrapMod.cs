@@ -1,6 +1,7 @@
 using HarmonyLib;
 using Godot;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
@@ -20,6 +21,7 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
+using MegaCrit.Sts2.Core.Unlocks;
 
 namespace STS2Bootstrap;
 
@@ -166,6 +168,89 @@ internal static class BootstrapSettingsPatch
     }
 }
 
+[HarmonyPatch(
+    typeof(SaveManager),
+    nameof(SaveManager.GenerateUnlockStateFromProgress))]
+internal static class PortableProfilePatch
+{
+    private static bool Prefix(ref UnlockState __result)
+    {
+        string? snapshotPath = System.Environment.GetEnvironmentVariable(
+            "STS2_BOOTSTRAP_PROFILE_SNAPSHOT");
+        if (string.IsNullOrWhiteSpace(snapshotPath))
+            return true;
+
+        var snapshot = JsonSerializer.Deserialize<PortableProfileSnapshot>(
+            File.ReadAllText(snapshotPath))
+            ?? throw new InvalidOperationException(
+                $"Invalid portable profile snapshot: {snapshotPath}");
+
+        if (string.Equals(
+            snapshot.Mode,
+            "all_unlocks",
+            StringComparison.Ordinal))
+        {
+            __result = UnlockState.all;
+            GD.Print("[STS2 Bootstrap] Using injected all-unlocks profile");
+            return false;
+        }
+        if (!string.Equals(
+            snapshot.Mode,
+            "progress_snapshot",
+            StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Unsupported portable profile mode: {snapshot.Mode}");
+        }
+        if (snapshot.NumberOfRuns < 0)
+            throw new InvalidOperationException(
+                "Portable profile number_of_runs must be nonnegative");
+
+        var encountersSeen = new List<ModelId>();
+        foreach (string encounterId in snapshot.EncounterIdsSeen)
+        {
+            int separator = encounterId.IndexOf('.');
+            if (separator <= 0 || separator == encounterId.Length - 1)
+                throw new InvalidOperationException(
+                    $"Invalid portable encounter ID: {encounterId}");
+            encountersSeen.Add(
+                new ModelId(
+                    encounterId[..separator],
+                    encounterId[(separator + 1)..]));
+        }
+
+        __result = new UnlockState(
+            snapshot.UnlockedEpochIds,
+            encountersSeen,
+            snapshot.NumberOfRuns);
+        GD.Print(
+            "[STS2 Bootstrap] Using injected profile snapshot "
+            + $"{snapshot.Sha256} "
+            + $"({snapshot.UnlockedEpochIds.Count} epochs, "
+            + $"{encountersSeen.Count} encounters, "
+            + $"{snapshot.NumberOfRuns} runs)");
+        return false;
+    }
+}
+
+internal sealed class PortableProfileSnapshot
+{
+    [JsonPropertyName("mode")]
+    public string Mode { get; init; } = "";
+
+    [JsonPropertyName("unlocked_epoch_ids")]
+    public List<string> UnlockedEpochIds { get; init; } = [];
+
+    [JsonPropertyName("encounter_ids_seen")]
+    public List<string> EncounterIdsSeen { get; init; } = [];
+
+    [JsonPropertyName("number_of_runs")]
+    public int NumberOfRuns { get; init; }
+
+    [JsonPropertyName("sha256")]
+    public string? Sha256 { get; init; }
+}
+
 [HarmonyPatch(typeof(NSceneBootstrapper), nameof(NSceneBootstrapper._Ready))]
 internal static class ReplayBootstrapPatch
 {
@@ -236,7 +321,19 @@ public sealed class HeadlessBootstrapSettings : IBootstrapSettings
 
     public HeadlessBootstrapSettings(string seed) => _seed = seed;
 
-    public CharacterModel Character => ModelDb.Character<Ironclad>();
+    public CharacterModel Character =>
+        (System.Environment.GetEnvironmentVariable(
+            "STS2_BOOTSTRAP_CHARACTER") ?? "Ironclad").Trim().ToLowerInvariant()
+        switch
+        {
+            "ironclad" => ModelDb.Character<Ironclad>(),
+            "silent" => ModelDb.Character<Silent>(),
+            "defect" => ModelDb.Character<Defect>(),
+            "regent" => ModelDb.Character<Regent>(),
+            "necrobinder" => ModelDb.Character<Necrobinder>(),
+            var character => throw new InvalidOperationException(
+                $"Unsupported bootstrap character: {character}")
+        };
     public RoomType RoomType =>
         string.Equals(
             System.Environment.GetEnvironmentVariable("STS2_BOOTSTRAP_MODE"),
@@ -247,7 +344,20 @@ public sealed class HeadlessBootstrapSettings : IBootstrapSettings
     public EncounterModel Encounter => ModelDb.Encounter<FuzzyWurmCrawlerWeak>();
     public EventModel Event => null!;
     public ActModel Act => ModelDb.Act<Overgrowth>();
-    public int Ascension => 0;
+    public int Ascension
+    {
+        get
+        {
+            string? value = System.Environment.GetEnvironmentVariable(
+                "STS2_BOOTSTRAP_ASCENSION");
+            if (string.IsNullOrWhiteSpace(value))
+                return 0;
+            if (!int.TryParse(value, out int ascension) || ascension < 0)
+                throw new InvalidOperationException(
+                    $"Invalid bootstrap ascension: {value}");
+            return ascension;
+        }
+    }
     public bool SaveRunHistory => false;
     public string Seed => _seed ?? System.Environment.GetEnvironmentVariable("STS2_BOOTSTRAP_SEED")
         ?? "HEADLESSBENCH";

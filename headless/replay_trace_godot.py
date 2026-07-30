@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -34,9 +35,6 @@ from headless.cross_backend_parity import (
     standalone_phase,
     translate_standalone_action,
 )
-from headless.sts2_cli_episode import load_progress_snapshot
-
-
 def _jsonl(file: Any, value: dict[str, Any]) -> None:
     file.write(json.dumps(value, separators=(",", ":")) + "\n")
     file.flush()
@@ -71,6 +69,88 @@ def _is_actionable(source: dict[str, Any], godot: dict[str, Any]) -> bool:
     return True
 
 
+def portable_profile_from_manifest(
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    profile = manifest.get("profile")
+    if not isinstance(profile, dict):
+        raise ValueError("Source episode manifest has no profile object")
+    mode = profile.get("mode")
+    if mode == "all_unlocks":
+        return {"mode": "all_unlocks"}
+    if mode != "progress_snapshot":
+        raise ValueError(f"Unsupported source episode profile mode: {mode!r}")
+
+    epochs = profile.get("unlocked_epoch_ids")
+    encounters = profile.get("encounter_ids_seen")
+    number_of_runs = profile.get("number_of_runs")
+    if not isinstance(epochs, list) or not all(
+        isinstance(value, str) for value in epochs
+    ):
+        raise ValueError("Profile unlocked_epoch_ids must be a list of strings")
+    if not isinstance(encounters, list) or not all(
+        isinstance(value, str) for value in encounters
+    ):
+        raise ValueError("Profile encounter_ids_seen must be a list of strings")
+    if type(number_of_runs) is not int or number_of_runs < 0:
+        raise ValueError("Profile number_of_runs must be a nonnegative integer")
+
+    snapshot = {
+        "unlocked_epoch_ids": epochs,
+        "encounter_ids_seen": encounters,
+        "number_of_runs": number_of_runs,
+    }
+    canonical = json.dumps(
+        snapshot, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    actual_sha256 = hashlib.sha256(canonical).hexdigest()
+    recorded_sha256 = profile.get("sha256")
+    if recorded_sha256 != actual_sha256:
+        raise ValueError(
+            "Source episode profile snapshot checksum does not match its "
+            f"contents (recorded={recorded_sha256}, actual={actual_sha256})"
+        )
+    return {
+        "mode": "progress_snapshot",
+        **snapshot,
+        "sha256": actual_sha256,
+    }
+
+
+def episode_character(
+    manifest: dict[str, Any], initial_state: dict[str, Any]
+) -> str:
+    character = manifest.get("character")
+    supported = {"Ironclad", "Silent", "Defect", "Regent", "Necrobinder"}
+    if character in supported:
+        return character
+
+    player_name = initial_state.get("player", {}).get("name")
+    inferred = {
+        "The Ironclad": "Ironclad",
+        "The Silent": "Silent",
+        "The Defect": "Defect",
+        "The Regent": "Regent",
+        "The Necrobinder": "Necrobinder",
+    }.get(player_name)
+    if inferred is not None:
+        return inferred
+    raise ValueError(
+        f"Source episode has no supported character metadata: {character!r}"
+    )
+
+
+def episode_ascension(manifest: dict[str, Any]) -> int:
+    ascension = manifest.get("ascension", 0)
+    if ascension is None and manifest.get("schema_version") == 1:
+        return 0
+    if type(ascension) is not int or ascension < 0:
+        raise ValueError(
+            f"Source episode has invalid ascension metadata: {ascension!r}"
+        )
+    return ascension
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_episode", type=Path)
@@ -78,11 +158,6 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=15526)
     parser.add_argument("--startup-timeout", type=float, default=60)
     parser.add_argument("--settle-timeout", type=float, default=5)
-    parser.add_argument(
-        "--progress-save",
-        type=Path,
-        help="active Godot progress.save; required for profile-backed episodes",
-    )
     parser.add_argument(
         "--parity-runs-dir", type=Path, default=Path("headless/parity-runs")
     )
@@ -94,21 +169,14 @@ def main() -> int:
     seed = str(source_manifest.get("seed") or "")
     if not seed:
         raise RuntimeError("Source episode manifest has no seed")
-    source_profile = source_manifest.get("profile", {})
-    if source_profile.get("mode") == "progress_snapshot":
-        if args.progress_save is None:
-            raise RuntimeError(
-                "Profile-backed episode requires --progress-save so the "
-                "active Godot profile can be verified"
-            )
-        active_profile = load_progress_snapshot(args.progress_save.resolve())
-        if active_profile["sha256"] != source_profile.get("sha256"):
-            raise RuntimeError(
-                "Godot profile snapshot does not match the source episode "
-                f"(source={source_profile.get('sha256')}, "
-                f"active={active_profile['sha256']})"
-            )
+    source_profile = portable_profile_from_manifest(source_manifest)
+    character = episode_character(source_manifest, source_initial)
+    ascension = episode_ascension(source_manifest)
     parity_dir = _allocate(args.parity_runs_dir, args.parity_dir)
+    profile_snapshot_path = (parity_dir / "profile-snapshot.json").resolve()
+    profile_snapshot_path.write_text(
+        json.dumps(source_profile, indent=2) + "\n", encoding="utf-8"
+    )
     report_path = parity_dir / "parity.json"
     game_log_path = parity_dir / "game.log"
     report: dict[str, Any] = {
@@ -116,6 +184,9 @@ def main() -> int:
         "source_episode": str(source_episode),
         "source_episode_id": source_manifest.get("episode_id"),
         "seed": seed,
+        "character": character,
+        "ascension": ascension,
+        "profile_mode": source_profile["mode"],
         "profile_sha256": source_profile.get("sha256"),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "running",
@@ -143,9 +214,16 @@ def main() -> int:
     windows_pid_path = subprocess.check_output(
         ["wslpath", "-w", str(pid_path)], text=True
     ).strip()
+    windows_profile_snapshot_path = subprocess.check_output(
+        ["wslpath", "-w", str(profile_snapshot_path)], text=True
+    ).strip()
     launch_script = (
         f"$env:STS2_BOOTSTRAP_SEED={powershell_literal(seed)}; "
         "$env:STS2_BOOTSTRAP_MODE='full'; "
+        f"$env:STS2_BOOTSTRAP_CHARACTER={powershell_literal(character)}; "
+        f"$env:STS2_BOOTSTRAP_ASCENSION={powershell_literal(str(ascension))}; "
+        "$env:STS2_BOOTSTRAP_PROFILE_SNAPSHOT="
+        f"{powershell_literal(windows_profile_snapshot_path)}; "
         f"$p=Start-Process -FilePath {powershell_literal(windows_game_path)} "
         f"-ArgumentList @({','.join(powershell_literal(arg) for arg in game_args)}) "
         "-NoNewWindow -PassThru; "

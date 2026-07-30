@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
 
 from headless.cross_backend_parity import (
     automatic_reconciliation_action,
     parity_diff,
     translate_standalone_action,
+)
+from headless.replay_trace_godot import (
+    episode_ascension,
+    episode_character,
+    portable_profile_from_manifest,
 )
 
 
@@ -249,6 +256,68 @@ class CrossBackendParityTests(unittest.TestCase):
             automatic_reconciliation_action(expected, godot),
             {"action": "claim_reward", "index": 3},
         )
+
+
+class PortableReplayInitializationTests(unittest.TestCase):
+    def test_accepts_all_unlocks_profile(self) -> None:
+        self.assertEqual(
+            portable_profile_from_manifest(
+                {"profile": {"mode": "all_unlocks"}}
+            ),
+            {"mode": "all_unlocks"},
+        )
+
+    def test_validates_progress_snapshot_checksum(self) -> None:
+        snapshot = {
+            "unlocked_epoch_ids": ["IRONCLAD2_EPOCH"],
+            "encounter_ids_seen": ["ENCOUNTER.SLIMES_WEAK"],
+            "number_of_runs": 3,
+        }
+        canonical = json.dumps(
+            snapshot, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        checksum = hashlib.sha256(canonical).hexdigest()
+        self.assertEqual(
+            portable_profile_from_manifest(
+                {
+                    "profile": {
+                        "mode": "progress_snapshot",
+                        **snapshot,
+                        "sha256": checksum,
+                        "source_sha256": "not-part-of-the-portable-input",
+                    }
+                }
+            ),
+            {
+                "mode": "progress_snapshot",
+                **snapshot,
+                "sha256": checksum,
+            },
+        )
+
+    def test_rejects_corrupt_progress_snapshot(self) -> None:
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            portable_profile_from_manifest(
+                {
+                    "profile": {
+                        "mode": "progress_snapshot",
+                        "unlocked_epoch_ids": [],
+                        "encounter_ids_seen": [],
+                        "number_of_runs": 0,
+                        "sha256": "incorrect",
+                    }
+                }
+            )
+
+    def test_infers_character_for_legacy_episode(self) -> None:
+        self.assertEqual(
+            episode_character(
+                {"schema_version": 1},
+                {"player": {"name": "The Ironclad"}},
+            ),
+            "Ironclad",
+        )
+        self.assertEqual(episode_ascension({"schema_version": 1}), 0)
 
 
 if __name__ == "__main__":

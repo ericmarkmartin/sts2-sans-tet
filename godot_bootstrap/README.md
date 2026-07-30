@@ -2,8 +2,8 @@
 
 This mod activates the game's built-in `--bootstrap` path, whose settings
 implementation is intentionally absent from release builds. It can start a
-seeded Ironclad combat against `FuzzyWurmCrawlerWeak` without loading the main
-menu or enter the normal seeded act lifecycle for full-run simulation.
+seeded combat against `FuzzyWurmCrawlerWeak` without loading the main menu or
+enter the normal seeded act lifecycle for full-run simulation.
 
 When STS2MCP is loaded, the mod also adds guarded `reset` and `reset_status`
 actions. They repeat the game's own cleanup/bootstrap sequence in-process and
@@ -27,6 +27,18 @@ dotnet build godot_bootstrap \
 Install `manifest.json` as `manifest.json` and the output DLL as
 `STS2_BOOTSTRAP.dll` in the game's `mods/STS2_BOOTSTRAP/` directory. Set
 `STS2_BOOTSTRAP_SEED` to override the default `HEADLESSBENCH` seed.
+
+Portable full-run initialization also accepts:
+
+- `STS2_BOOTSTRAP_CHARACTER`: `Ironclad`, `Silent`, `Defect`, `Regent`, or
+  `Necrobinder`.
+- `STS2_BOOTSTRAP_ASCENSION`: a nonnegative ascension level.
+- `STS2_BOOTSTRAP_PROFILE_SNAPSHOT`: a JSON file containing either
+  `{"mode":"all_unlocks"}` or an episode's recorded `progress_snapshot`.
+
+The profile snapshot is used only as the immutable unlock/encounter-history
+input to run construction. This lets a recorded episode reproduce room RNG
+without requiring or modifying a matching active `progress.save`.
 
 See `headless/END_TO_END_REPLAY.md` and `headless/HANDOFF.md` for the validated
 simulation and rendering workflows, limitations, and next work.

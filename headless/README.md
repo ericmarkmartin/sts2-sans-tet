@@ -58,12 +58,13 @@ current replay limitations. Replay the resulting episode through Godot with:
 
 ```bash
 ./headless/run_episode.sh \
-  --replay-episode headless/episodes/episode-NNNN \
-  --progress-save "<active-modded-profile>/saves/progress.save"
+  --replay-episode headless/episodes/episode-NNNN
 ```
 
-This external backend is now the practical full-run standalone baseline. A
-124-action episode has matched Godot end-to-end; see
+The replay uses the episode's recorded profile snapshot, character, ascension,
+and seed; it does not require the original `progress.save`. This external
+backend is now the practical full-run standalone baseline. Profile-backed and
+all-unlocks episodes have matched Godot end-to-end; see
 [CROSS_BACKEND_PARITY.md](CROSS_BACKEND_PARITY.md). The smaller host
 implemented in this directory remains useful for testing minimal service
 initialization and for measuring how much can eventually be brought in-tree.

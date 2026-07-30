@@ -394,6 +394,8 @@ def run_episode(args: argparse.Namespace) -> Path:
         "started_at_utc": started_at,
         "ended_at_utc": datetime.now(timezone.utc).isoformat(),
         "seed": args.seed,
+        "character": args.character,
+        "ascension": args.ascension,
         "policy_seed": args.policy_seed,
         "max_actions": args.max_actions,
         "observation": {

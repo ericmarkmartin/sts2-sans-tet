@@ -164,6 +164,8 @@ class Sts2CliEpisodeTests(unittest.TestCase):
         manifest = json.loads(
             (episode / "manifest.json").read_text(encoding="utf-8")
         )
+        self.assertEqual(manifest["character"], "Ironclad")
+        self.assertEqual(manifest["ascension"], 0)
         self.assertEqual(manifest["grade"]["value"], 0)
         self.assertEqual(manifest["summary"]["actions"], 1)
 

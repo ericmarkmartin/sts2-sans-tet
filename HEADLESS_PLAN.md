@@ -35,10 +35,14 @@ release gate for standalone changes.
   boundary. `--progress-save` captures the run-shaping unlock snapshot
   (revealed epochs, seen encounters, and run count) and fingerprints it in the
   manifest; seed alone is not sufficient provenance because room generation
-  consumes RNG according to unlocked content.
+  consumes RNG according to unlocked content. The source save is only needed
+  during capture.
 - `headless/replay_trace_godot.py` semantically translates a standalone episode
   into Godot actions, labels presentation-only actions as automatic, and
-  compares normalized checkpoints after every source action.
+  compares normalized checkpoints after every source action. It injects the
+  manifest's validated profile snapshot, character, ascension, and seed into
+  Godot run construction, so replay does not depend on the active mutable
+  profile.
 - Episode `0012` passed full cross-backend replay: all 124 source actions,
   140 Godot actions (16 automatic), four combats, rewards/card selections,
   an event, map movement, a Fishing Rod upgrade, and terminal floor-8 loss
@@ -47,6 +51,9 @@ release gate for standalone changes.
 - Profile-backed episodes `0012` and `0013` were exact deterministic repeats:
   identical initial state, all 124 actions, all 124 result states, and terminal
   summary after timing fields were excluded.
+- Portable replay of profile-backed `0012` passed without a `progress.save`
+  argument. A newly generated all-unlocks `0014` also passed: all 109 source
+  actions, 122 Godot actions (13 automatic), and terminal floor-6 loss matched.
 - The standalone fork still produces no `.mcr`. Godot remains the rendering
   backend; the now-validated episode trace can reconstruct the whole run, while
   archived `.mcr` remains the highest-fidelity combat artifact when available.
