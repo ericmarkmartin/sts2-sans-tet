@@ -22,10 +22,17 @@ The random agent dies fast (floor 2-6), so later-game states (bosses, act transi
 
 ## Quick Start
 
-For the validated Godot-headless combat simulation plus built-in `.mcr` replay
-workflow, use [headless/END_TO_END_REPLAY.md](headless/END_TO_END_REPLAY.md).
-It is the canonical fresh-session runbook and includes a copy-paste Codex
-prompt.
+There are now two end-to-end runners:
+
+- [headless/STS2_CLI_BACKEND.md](headless/STS2_CLI_BACKEND.md) records full
+  standalone runs without launching Godot or Steam. This is the simpler
+  simulation/training path.
+- [headless/END_TO_END_REPLAY.md](headless/END_TO_END_REPLAY.md) runs the real
+  game under Godot headless and archives built-in `.mcr` combat replays. This
+  remains the reference and video-rendering path.
+
+Both write the same `episode-NNNN` artifact layout and include a copy-paste
+fresh-session prompt.
 
 ### Prerequisites
 - Slay the Spire 2 (Steam, Windows)

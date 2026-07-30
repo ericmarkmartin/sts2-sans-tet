@@ -39,6 +39,25 @@ repeatedly without restarting the process. See
 [STDIO_PROTOCOL.md](STDIO_PROTOCOL.md) for the request/response contract and
 current scope.
 
+## Standalone full runs
+
+Our pinned `sts2-cli` fork can already drive map, event, combat, reward,
+rest-site, shop, and terminal states without Godot. The adapter in this
+repository records its native, versioned observations in the same episode
+layout used by the Godot-headless runner:
+
+```bash
+./headless/run_sts2_cli_episode.sh --cli-dir ../sts2-cli \
+  --game-data-dir "<game>/data_sts2_windows_x86_64"
+```
+
+See [STS2_CLI_BACKEND.md](STS2_CLI_BACKEND.md) for the pinned revision,
+fresh-session setup, information-policy distinction, provenance fields, and
+current replay limitations. This external backend is now the practical
+full-run standalone baseline. The smaller host implemented in this directory
+remains useful for testing minimal service initialization and for measuring
+how much of that implementation can eventually be brought in-tree.
+
 ## Phase A findings
 
 Tested on 2026-07-26 against the installed Windows game assemblies from a Linux

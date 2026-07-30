@@ -17,7 +17,28 @@ This is now a two-track investigation:
 Do not build protocol or Gym plumbing around a backend until that backend can
 reset a run and execute at least one complete combat.
 
-## Current status (2026-07-27)
+## Current status (2026-07-30)
+
+- A compatibility branch of `wuhao21/sts2-cli` is now pinned at
+  `ericmarkmartin/sts2-cli@f4c83d0`. It builds against the installed current
+  game, completes full standalone episodes, and passes 60 tests. Its Neow and
+  other suspended-choice interactions now resume the original engine task
+  rather than re-entering the choice.
+- The fork exposes versioned `sts2-cli.observation.v1` decisions. Human mode
+  includes visible pile membership without leaking private draw order;
+  authoritative mode additionally exposes engine pile order. Canonical
+  observation hashes support divergence detection.
+- `headless/sts2_cli_episode.py` adapts that protocol to this repository's
+  `initial.state` / `actions.jsonl` / `results.jsonl` / `manifest.json`
+  contract. `headless/run_sts2_cli_episode.sh` is the stable, reusable command
+  boundary.
+- Three full standalone smoke tests reached a legitimate terminal floor-6
+  loss in 109 actions. Repeated runs with the same game and policy seeds had
+  byte-equivalent initial states, action payloads, and all 109 result states.
+  The offline validator accepted each episode.
+- The standalone fork currently produces no `.mcr`. Godot headless remains the
+  rendered reference and combat-video backend until action-trace replay parity
+  is implemented and checksum-validated.
 
 - Phase A passed: `sts2.dll` loads in .NET 9, all types required by the probe
   resolve, and `MegaCrit.Sts2.Core.Runs.RunManager` constructs successfully.

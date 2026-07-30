@@ -1,10 +1,16 @@
 # Headless simulation and replay handoff
 
-Status as of 2026-07-26 on branch `headless-godot-bootstrap`.
+Status as of 2026-07-30 on branch `headless-godot-bootstrap`.
 
 ## What works
 
 - A pinned `nix develop` shell supplies .NET 9, Python 3.11, `uv`, and FFmpeg.
+- The pinned `ericmarkmartin/sts2-cli@f4c83d0` fork runs complete episodes
+  without Godot. `run_sts2_cli_episode.sh` records its versioned observations
+  in the same core episode layout and pins original/patched DLL hashes.
+- Standalone episodes 0004–0006 each reached a terminal floor-6 loss in 109
+  actions. Episodes 0005 and 0006 matched exactly across their initial state,
+  action sequence, all result states, and terminal summary.
 - The real game runs under Godot `--headless --audio-driver Dummy`.
 - The bootstrap mod enters deterministic combat or a normal full run without
   menu automation.
@@ -50,6 +56,10 @@ Status as of 2026-07-26 on branch `headless-godot-bootstrap`.
 - `.mcr` is combat-only. We do not yet have a renderer for map, reward, event,
   shop, or rest-site decisions. Those transitions are preserved in episode
   JSONL, but cannot yet be fed into the game's built-in replay player.
+- The standalone `sts2-cli` backend does not currently emit `.mcr` at all.
+  Its JSONL is sufficient for policy evaluation and future action replay, but
+  not yet for faithful video. Treat rendered re-execution as valid only after
+  a pinned Godot build reproduces expected observation/checksum checkpoints.
 - MCR-to-MP4 is currently two stages: `render_combat_replay.ps1` creates a
   large MJPEG/PCM AVI, then FFmpeg transcodes it. There is no single
   episode-level command, manifest video entry, or automatic intermediate
@@ -87,17 +97,22 @@ and approve the script paths rather than every expanded command:
 2. `headless/render_episode_replays.sh`: render selected MCRs, transcode,
    and validate their streams. Manifest video updates remain future work.
 3. `headless/verify_environment.sh`: read-only game/mod/version checks.
+4. `headless/run_sts2_cli_episode.sh`: optionally set up the pinned standalone
+   fork, then record one standalone episode.
 
 Good reusable approval prefixes after those scripts are reviewed:
 
 ```text
 ["./headless/verify_environment.sh"]
 ["./headless/run_episode.sh"]
+["./headless/run_sts2_cli_episode.sh"]
 ["./headless/render_episode_replays.sh"]
 ```
 
-The first script should be read-only. The latter two legitimately launch the
-Windows game; `run_episode.sh` may also install rebuilt mod DLLs. Keep those
+The first script should be read-only. The Godot run/render scripts legitimately
+launch the Windows game. The standalone wrapper never launches Godot or Steam;
+its optional `--setup` mode reads installed game assemblies and writes only
+the selected sts2-cli checkout before writing an episode here. Keep those
 effects explicit in `--help`.
 
 ### Game-facing investigations

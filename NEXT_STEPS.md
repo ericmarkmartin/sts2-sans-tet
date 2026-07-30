@@ -1,5 +1,54 @@
 # Next Steps
 
+## Current direction (2026-07-30)
+
+The original roadmap below predates the Godot-headless benchmarks, the in-tree
+standalone experiments, and the `sts2-cli` evaluation. The working architecture
+is now:
+
+```text
+agent / training loop
+        |
+episode + observation contract
+   _____|_____
+  |           |
+sts2-cli      Godot headless + STS2MCP
+standalone    reference/replay renderer
+```
+
+- Use the pinned `ericmarkmartin/sts2-cli@f4c83d0` fork as the practical
+  standalone full-run backend. It does not launch Godot or Steam, but still
+  requires assemblies from an installed game and runs a privately patched
+  copy of `sts2.dll`.
+- Use the real game under Godot headless as the semantic reference, built-in
+  `.mcr` source, and MP4 renderer.
+- Preserve backend-native observations and make their information policy
+  explicit. Human evaluation hides private draw order; authoritative debugging
+  may expose it.
+- Keep the smaller in-tree standalone host as a compatibility/performance
+  experiment. Do not duplicate the fork's broad run implementation unless a
+  benchmark or maintainability result justifies it.
+- Do not promise thousands of games per second. The first complete standalone
+  episodes execute roughly 32–43 external decisions per second including
+  simulator startup; throughput needs controlled multi-episode and
+  multi-process measurement.
+
+Immediate work:
+
+1. Checkpoint and push the tested standalone episode adapter.
+2. Add cross-backend fixtures for representative combat and non-combat
+   decisions, including legal actions and visible-information policy.
+3. Replay a standalone episode's external action trace in a pinned rendered
+   build and compare observation/checksum checkpoints.
+4. Only after parity is measured, build the JSONL-to-rendered-video path for
+   out-of-combat transitions.
+5. Improve the policy and later-state coverage independently from backend
+   correctness.
+
+The remaining sections record the original architecture rationale. Treat their
+uncompleted phase ordering as historical, not as the active execution plan;
+the maintained implementation plan is [HEADLESS_PLAN.md](HEADLESS_PLAN.md).
+
 ## Architecture
 
 ```
@@ -47,9 +96,9 @@ STS2MCP already has the `RunOnMainThread` queue for executing actions on the God
 - `STS2Env` gymnasium wrapper using the protocol layer
 - Random-policy smoke test running continuous episodes
 
-## Phase 2: Headless Backend
+## Original Phase 2: Headless Backend
 
-**Goal:** Thousands of games/sec for large-scale training.
+**Original goal:** Explore a substantially faster backend for training.
 
 Load `sts2.dll` in a standalone .NET process without Godot. Implement the same protocol contract as the Godot backend.
 
