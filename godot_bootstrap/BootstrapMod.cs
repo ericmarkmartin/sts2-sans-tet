@@ -31,6 +31,7 @@ public static class BootstrapMod
     private static int _resetting;
     private static int _nextResetId;
     private static int _completedResetId;
+    private static int _finishingRender;
     private static string? _resetError;
 
     public static void Initialize()
@@ -80,6 +81,29 @@ public static class BootstrapMod
             return false;
         }
 
+        if (action == "finish_render")
+        {
+            if (string.IsNullOrWhiteSpace(
+                System.Environment.GetEnvironmentVariable(
+                    "STS2_BOOTSTRAP_RENDER")))
+            {
+                __result = new()
+                {
+                    ["status"] = "error",
+                    ["message"] = "No rendered replay is active"
+                };
+                return false;
+            }
+            if (Interlocked.CompareExchange(ref _finishingRender, 1, 0) == 0)
+                TaskHelper.RunSafely(FinishRenderAsync());
+            __result = new()
+            {
+                ["status"] = "accepted",
+                ["message"] = "Finishing rendered replay"
+            };
+            return false;
+        }
+
         if (action != "reset")
             return true;
 
@@ -107,6 +131,29 @@ public static class BootstrapMod
             ["seed"] = seed
         };
         return false;
+    }
+
+    private static async Task FinishRenderAsync()
+    {
+        int tailFrames = 30;
+        string? configured = System.Environment.GetEnvironmentVariable(
+            "STS2_BOOTSTRAP_RENDER_TAIL_FRAMES");
+        if (!string.IsNullOrWhiteSpace(configured)
+            && (!int.TryParse(configured, out tailFrames)
+                || tailFrames < 0
+                || tailFrames > 600))
+        {
+            throw new InvalidOperationException(
+                $"Invalid render tail frame count: {configured}");
+        }
+        var game = NGame.Instance
+            ?? throw new InvalidOperationException(
+                "NGame is unavailable while finishing render");
+        for (int frame = 0; frame < tailFrames; frame++)
+            await game.GetTree().Root.AwaitProcessFrame();
+        GD.Print(
+            $"[STS2 Bootstrap] Render complete after {tailFrames} tail frames");
+        game.GetTree().Quit();
     }
 
     private static async Task ResetAsync(string seed, int resetId)
@@ -251,6 +298,20 @@ internal sealed class PortableProfileSnapshot
     public string? Sha256 { get; init; }
 }
 
+[HarmonyPatch(typeof(SaveManager), nameof(SaveManager.SaveProgressFile))]
+internal static class PortableProgressSavePatch
+{
+    private static bool Prefix()
+    {
+        bool portableReplay = !string.IsNullOrWhiteSpace(
+            System.Environment.GetEnvironmentVariable(
+                "STS2_BOOTSTRAP_PROFILE_SNAPSHOT"));
+        if (portableReplay)
+            GD.Print("[STS2 Bootstrap] Suppressed portable replay progress save");
+        return !portableReplay;
+    }
+}
+
 [HarmonyPatch(typeof(NSceneBootstrapper), nameof(NSceneBootstrapper._Ready))]
 internal static class ReplayBootstrapPatch
 {
@@ -367,7 +428,19 @@ public sealed class HeadlessBootstrapSettings : IBootstrapSettings
 
     public Task Setup(Player localPlayer)
     {
-        SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
+        string fastMode = (
+            System.Environment.GetEnvironmentVariable(
+                "STS2_BOOTSTRAP_FAST_MODE") ?? "instant")
+            .Trim()
+            .ToLowerInvariant();
+        SaveManager.Instance.PrefsSave.FastMode = fastMode switch
+        {
+            "normal" => FastModeType.Normal,
+            "fast" => FastModeType.Fast,
+            "instant" => FastModeType.Instant,
+            _ => throw new InvalidOperationException(
+                $"Invalid bootstrap fast mode: {fastMode}")
+        };
         return Task.CompletedTask;
     }
 }

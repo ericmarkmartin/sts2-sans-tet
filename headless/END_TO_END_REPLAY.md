@@ -228,6 +228,16 @@ nested game/FFmpeg command. Likewise, use `./headless/run_episode.sh` for future
 episode runs and `./headless/verify_environment.sh` for read-only prerequisite
 checks.
 
+For standalone portable episodes without `.mcr` files, render the entire run
+instead:
+
+```bash
+./headless/render_full_episode.sh headless/episodes/episode-NNNN
+```
+
+This covers between-combat screens and requires semantic parity before the
+muted MP4 is accepted. See [FULL_EPISODE_RENDER.md](FULL_EPISODE_RENDER.md).
+
 ## Failure recovery
 
 - **Port already accepting connections:** inspect and stop only the stale

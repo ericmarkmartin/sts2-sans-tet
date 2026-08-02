@@ -69,6 +69,17 @@ all-unlocks episodes have matched Godot end-to-end; see
 implemented in this directory remains useful for testing minimal service
 initialization and for measuring how much can eventually be brought in-tree.
 
+Render the entire episode, including non-combat screens, to a muted MP4:
+
+```bash
+./headless/render_full_episode.sh headless/episodes/episode-NNNN
+```
+
+This fails closed on runtime hash drift, semantic divergence, profile writes,
+wrong video dimensions/codecs, or an audio stream. See
+[FULL_EPISODE_RENDER.md](FULL_EPISODE_RENDER.md) for outputs and the
+fresh-session procedure.
+
 ## Phase A findings
 
 Tested on 2026-07-26 against the installed Windows game assemblies from a Linux

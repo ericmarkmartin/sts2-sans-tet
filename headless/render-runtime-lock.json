@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "release": "v0.107.1",
+  "files": {
+    "SlayTheSpire2.exe": "59c3e86e43e8388cb2b03e40544cca7309c7d34519498bed91d88595e766bf82",
+    "data_sts2_windows_x86_64/sts2.dll": "a1f9e653f1e28e4076558fee1e60d218619cb7e057b887c6417f62c62c6d7a52",
+    "mods/STS2_MCP/manifest.json": "746318a7c495612eba8b1fe94f272de61661e54af21e2a696f06fc1b631b8689",
+    "mods/STS2_MCP/STS2_MCP.dll": "f35528db7bebeca75679edafc9dfd8f9f30bb1cc33c153c8273657ced37fee4c",
+    "mods/STS2_BOOTSTRAP/manifest.json": "876488fb5646436dff703a1abdb8817c5e3f074020249dc4072f28466340747d",
+    "mods/STS2_BOOTSTRAP/STS2_BOOTSTRAP.dll": "019b77f4f40dd0cf080a7d2023f159b834007d25afcfaf3583c8bb0360ea7611"
+  }
+}

@@ -40,5 +40,11 @@ The profile snapshot is used only as the immutable unlock/encounter-history
 input to run construction. This lets a recorded episode reproduce room RNG
 without requiring or modifying a matching active `progress.save`.
 
+When `STS2_BOOTSTRAP_RENDER` is set, the companion `finish_render` bridge
+action waits the configured `STS2_BOOTSTRAP_RENDER_TAIL_FRAMES` and quits Godot
+gracefully so Movie Maker finalizes its AVI. `STS2_BOOTSTRAP_FAST_MODE` accepts
+`instant`, `fast`, or `normal`. Portable snapshot runs suppress progress-file
+writes regardless of render mode.
+
 See `headless/END_TO_END_REPLAY.md` and `headless/HANDOFF.md` for the validated
 simulation and rendering workflows, limitations, and next work.

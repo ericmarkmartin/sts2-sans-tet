@@ -20,6 +20,7 @@ headless/episode-trace.jsonl
 headless/replays/
 headless/episodes/
 headless/parity-runs/
+headless/render-runs/
 
 # IDE
 .vs/

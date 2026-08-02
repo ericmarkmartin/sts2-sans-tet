@@ -159,10 +159,40 @@ def main() -> int:
     parser.add_argument("--startup-timeout", type=float, default=60)
     parser.add_argument("--settle-timeout", type=float, default=5)
     parser.add_argument(
+        "--movie",
+        type=Path,
+        help="capture this replay to a Godot Movie Maker AVI",
+    )
+    parser.add_argument("--fixed-fps", type=int, default=30)
+    parser.add_argument("--resolution", default="1280x720")
+    parser.add_argument("--frame-delay-ms", type=int, default=34)
+    parser.add_argument("--action-delay", type=float, default=0.35)
+    parser.add_argument("--render-tail-frames", type=int, default=30)
+    parser.add_argument(
+        "--game-speed",
+        choices=("instant", "fast", "normal"),
+        default="instant",
+    )
+    parser.add_argument(
         "--parity-runs-dir", type=Path, default=Path("headless/parity-runs")
     )
     parser.add_argument("--parity-dir", type=Path)
     args = parser.parse_args()
+
+    if args.fixed_fps <= 0:
+        raise ValueError("--fixed-fps must be positive")
+    if args.frame_delay_ms < 0:
+        raise ValueError("--frame-delay-ms must be nonnegative")
+    if args.action_delay < 0:
+        raise ValueError("--action-delay must be nonnegative")
+    if not 0 <= args.render_tail_frames <= 600:
+        raise ValueError("--render-tail-frames must be between 0 and 600")
+    resolution_parts = args.resolution.lower().split("x", maxsplit=1)
+    if (
+        len(resolution_parts) != 2
+        or not all(part.isdecimal() and int(part) > 0 for part in resolution_parts)
+    ):
+        raise ValueError("--resolution must look like 1280x720")
 
     source_episode = args.source_episode.resolve()
     source_initial, steps, source_manifest = load_standalone_trace(source_episode)
@@ -173,6 +203,12 @@ def main() -> int:
     character = episode_character(source_manifest, source_initial)
     ascension = episode_ascension(source_manifest)
     parity_dir = _allocate(args.parity_runs_dir, args.parity_dir)
+    movie_path: Path | None = None
+    if args.movie is not None:
+        movie_path = args.movie.resolve()
+        movie_path.parent.mkdir(parents=True, exist_ok=True)
+        if movie_path.exists():
+            raise RuntimeError(f"Movie output already exists: {movie_path}")
     profile_snapshot_path = (parity_dir / "profile-snapshot.json").resolve()
     profile_snapshot_path.write_text(
         json.dumps(source_profile, indent=2) + "\n", encoding="utf-8"
@@ -196,6 +232,21 @@ def main() -> int:
         "automatic_actions": 0,
         "checkpoints": [],
         "divergence": None,
+        "render": (
+            {
+                "movie": str(movie_path),
+                "fixed_fps": args.fixed_fps,
+                "resolution": args.resolution,
+                "frame_delay_ms": args.frame_delay_ms,
+                "action_delay_seconds": args.action_delay,
+                "tail_frames": args.render_tail_frames,
+                "game_speed": args.game_speed,
+                "muted": True,
+                "finish_result": None,
+            }
+            if movie_path is not None
+            else None
+        ),
     }
     _write_report(report_path, report)
 
@@ -206,7 +257,6 @@ def main() -> int:
                 f"Port {args.port} is already accepting connections"
             )
 
-    game_args = ["--headless", "--audio-driver", "Dummy", "--bootstrap"]
     pid_path = (parity_dir / ".game.pid").resolve()
     windows_game_path = subprocess.check_output(
         ["wslpath", "-w", str(args.game)], text=True
@@ -217,19 +267,52 @@ def main() -> int:
     windows_profile_snapshot_path = subprocess.check_output(
         ["wslpath", "-w", str(profile_snapshot_path)], text=True
     ).strip()
-    launch_script = (
-        f"$env:STS2_BOOTSTRAP_SEED={powershell_literal(seed)}; "
-        "$env:STS2_BOOTSTRAP_MODE='full'; "
-        f"$env:STS2_BOOTSTRAP_CHARACTER={powershell_literal(character)}; "
-        f"$env:STS2_BOOTSTRAP_ASCENSION={powershell_literal(str(ascension))}; "
-        "$env:STS2_BOOTSTRAP_PROFILE_SNAPSHOT="
-        f"{powershell_literal(windows_profile_snapshot_path)}; "
-        f"$p=Start-Process -FilePath {powershell_literal(windows_game_path)} "
-        f"-ArgumentList @({','.join(powershell_literal(arg) for arg in game_args)}) "
-        "-NoNewWindow -PassThru; "
-        f"[IO.File]::WriteAllText({powershell_literal(windows_pid_path)},[string]$p.Id); "
-        "$p.WaitForExit(); exit $p.ExitCode"
+    if movie_path is None:
+        game_args = ["--headless", "--audio-driver", "Dummy", "--bootstrap"]
+    else:
+        windows_movie_path = subprocess.check_output(
+            ["wslpath", "-w", str(movie_path)], text=True
+        ).strip()
+        game_args = [
+            "--bootstrap",
+            "--audio-driver",
+            "Dummy",
+            "--write-movie",
+            windows_movie_path,
+            "--fixed-fps",
+            str(args.fixed_fps),
+            "--frame-delay",
+            str(args.frame_delay_ms),
+            "--resolution",
+            args.resolution,
+            "--windowed",
+            "--disable-vsync",
+        ]
+    launch_parts = [
+        f"$env:STS2_BOOTSTRAP_SEED={powershell_literal(seed)}; ",
+        "$env:STS2_BOOTSTRAP_MODE='full'; ",
+        f"$env:STS2_BOOTSTRAP_CHARACTER={powershell_literal(character)}; ",
+        f"$env:STS2_BOOTSTRAP_ASCENSION={powershell_literal(str(ascension))}; ",
+        f"$env:STS2_BOOTSTRAP_FAST_MODE={powershell_literal(args.game_speed)}; ",
+        "$env:STS2_BOOTSTRAP_PROFILE_SNAPSHOT=",
+        f"{powershell_literal(windows_profile_snapshot_path)}; ",
+    ]
+    if movie_path is not None:
+        launch_parts.append(
+            "$env:STS2_BOOTSTRAP_RENDER='1'; "
+            "$env:STS2_BOOTSTRAP_RENDER_TAIL_FRAMES="
+            f"{powershell_literal(str(args.render_tail_frames))}; "
+        )
+    launch_parts.extend(
+        [
+            f"$p=Start-Process -FilePath {powershell_literal(windows_game_path)} "
+            f"-ArgumentList @({','.join(powershell_literal(arg) for arg in game_args)}) ",
+            "-NoNewWindow -PassThru; "
+            f"[IO.File]::WriteAllText({powershell_literal(windows_pid_path)},[string]$p.Id); ",
+            "$p.WaitForExit(); exit $p.ExitCode",
+        ]
     )
+    launch_script = "".join(launch_parts)
     game_log = game_log_path.open("wb")
     process = subprocess.Popen(
         ["powershell.exe", "-NoProfile", "-Command", launch_script],
@@ -340,6 +423,8 @@ def main() -> int:
                     "action": action,
                 },
             )
+            if movie_path is not None and args.action_delay:
+                time.sleep(args.action_delay)
             result = bridge.request("POST", "/api/v1/singleplayer", action)
             report["godot_actions"] += 1
             if automatic:
@@ -378,6 +463,23 @@ def main() -> int:
                     "state": state,
                 },
             )
+
+        if movie_path is not None:
+            finish_result = bridge.request(
+                "POST", "/api/v1/singleplayer", {"action": "finish_render"}
+            )
+            report["render"]["finish_result"] = finish_result
+            if finish_result.get("status") != "accepted":
+                raise RuntimeError(
+                    f"Bootstrap rejected finish_render: {finish_result}"
+                )
+            process.wait(timeout=30)
+            if process.returncode not in {None, 0}:
+                raise RuntimeError(
+                    f"Rendered game exited with code {process.returncode}"
+                )
+            if not movie_path.is_file() or movie_path.stat().st_size == 0:
+                raise RuntimeError(f"Godot did not produce a movie: {movie_path}")
 
         report["ended_at_utc"] = datetime.now(timezone.utc).isoformat()
         report["elapsed_seconds"] = time.monotonic() - started

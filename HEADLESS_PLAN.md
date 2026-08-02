@@ -54,6 +54,13 @@ release gate for standalone changes.
 - Portable replay of profile-backed `0012` passed without a `progress.save`
   argument. A newly generated all-unlocks `0014` also passed: all 109 source
   actions, 122 Godot actions (13 automatic), and terminal floor-6 loss matched.
+- `headless/render_full_episode.sh` now turns that portable trace into a muted,
+  provenance-linked MP4 while requiring the same complete parity. The renderer
+  pins all installed runtime hashes, gracefully finalizes Godot Movie Maker,
+  suppresses active-profile progress writes, scales to the requested output,
+  and validates codec/dimensions/no-audio with ffprobe. `episode-0014` produced
+  a passing 43.23-second 1280x720/30 FPS render. Profile-backed, four-combat
+  `episode-0012` also passed with a 45.47-second render.
 - The standalone fork still produces no `.mcr`. Godot remains the rendering
   backend; the now-validated episode trace can reconstruct the whole run, while
   archived `.mcr` remains the highest-fidelity combat artifact when available.

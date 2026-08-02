@@ -92,3 +92,7 @@ This is semantic parity, not a byte-level engine checksum proof. Next coverage
 work should add several fixed profile snapshots and seeds, every character,
 act transitions, elites/bosses, shop/rest branches, potion use, and
 checksum-level assertions where both backends expose comparable values.
+
+The same comparator now gates whole-episode Movie Maker capture. A video is
+accepted only after complete parity and stream validation; see
+[FULL_EPISODE_RENDER.md](FULL_EPISODE_RENDER.md).

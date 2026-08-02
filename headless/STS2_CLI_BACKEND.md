@@ -148,6 +148,7 @@ actually produced and validated it.
   path. The episode JSONL trace now drives the Godot semantic replay adapter,
   but it is not itself an `.mcr` and cannot be passed directly to the game's
   native replay player.
-- Post-hoc whole-episode MP4 capture still needs a rendered launch/capture mode
-  around the validated action replay. Do not confuse semantic parity with an
-  already-produced video artifact.
+- Post-hoc whole-episode MP4 capture now passes through the locked, muted
+  `render_full_episode.sh` workflow. See
+  [FULL_EPISODE_RENDER.md](FULL_EPISODE_RENDER.md). Fast/normal-speed visual
+  pacing and broad character coverage remain future work.

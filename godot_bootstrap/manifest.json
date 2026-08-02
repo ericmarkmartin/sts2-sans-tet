@@ -2,8 +2,8 @@
   "id": "STS2_BOOTSTRAP",
   "name": "STS2 Headless Bootstrap",
   "author": "sts2-sans-tet",
-  "description": "Supplies deterministic direct-run settings for Godot headless benchmarks.",
-  "version": "0.1.0",
+  "description": "Supplies deterministic portable run settings and replay rendering support.",
+  "version": "0.2.0",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true

@@ -53,23 +53,16 @@ Status as of 2026-07-30 on branch `headless-godot-bootstrap`.
   Rendered playback reaches the recorded victories, but it is action-replayed,
   not checksum-validated. The game consequently logs noisy "checksum does not
   exist in replay data" divergence messages.
-- `.mcr` is combat-only. We do not yet have a renderer for map, reward, event,
-  shop, or rest-site decisions. Those transitions are preserved in episode
-  JSONL, but cannot yet be fed into the game's built-in replay player.
+- `.mcr` remains combat-only, but portable JSONL episode traces now render map,
+  reward, event, shop, rest-site, and combat screens through
+  `headless/render_full_episode.sh`.
 - The standalone `sts2-cli` backend does not currently emit `.mcr` at all.
-  Its JSONL is sufficient for policy evaluation and future action replay, but
-  not yet for faithful video. Treat rendered re-execution as valid only after
-  a pinned Godot build reproduces expected observation/checksum checkpoints.
-- MCR-to-MP4 is currently two stages: `render_combat_replay.ps1` creates a
-  large MJPEG/PCM AVI, then FFmpeg transcodes it. There is no single
-  episode-level command, manifest video entry, or automatic intermediate
-  cleanup yet.
-- Saved display settings override the requested 1280x720 capture size, so the
-  current outputs are 2560x1440 at 60 FPS.
-- Audio tracks exist, but combats 001 and 002 contain very little encoded audio
-  and may effectively be silent. Audio behavior needs an explicit check.
-- The whole implementation is uncommitted. Preserve unrelated changes and make
-  a reviewed checkpoint commit before risky refactors.
+  Its JSONL is sufficient for policy evaluation and state-driven whole-run
+  video. The full renderer requires a pinned Godot build and complete semantic
+  checkpoint parity before accepting the MP4.
+- MCR-to-MP4 remains a separate combat-fidelity path. The portable full-run
+  wrapper performs capture, scaling, muted transcoding, ffprobe validation,
+  and provenance linkage in one command while retaining the AVI.
 
 ## Recommended next work
 
@@ -137,10 +130,10 @@ These need the rendered game and therefore at least one reusable approval:
    stable prefixes receive one-time approval.
 3. Review the complete diff and create an incremental commit on the existing
    branch.
-4. With one approval for the render wrapper, automate episode-level MP4
-   generation and manifest updates.
-5. Investigate missing checksums and non-combat replay without changing the
-   episode artifact contract.
+4. Expand the passing full-run renderer beyond Instant pacing and the current
+   Ironclad/ascension-0 coverage.
+5. Investigate comparable checksum exposure in both backends without changing
+   the episode artifact contract.
 
 At every stage, avoid deleting AVI intermediates or modifying installed game
 files unless the command and its reported effects explicitly say so.
